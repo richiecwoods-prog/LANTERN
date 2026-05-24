@@ -1,8 +1,57 @@
-import './App.css'
+﻿import './App.css'
 
 const backend = 'http://127.0.0.1:8000'
 
-function App() {
+type PageLink = {
+  title: string
+  description: string
+  href: string
+}
+
+const pages: PageLink[] = [
+  {
+    title: 'Home Dashboard',
+    description: 'Main local dashboard entry page.',
+    href: `${backend}/static/home.html`,
+  },
+  {
+    title: 'Briefing',
+    description: 'EEI-style briefing and decision support view.',
+    href: `${backend}/static/briefing.html?v=080`,
+  },
+  {
+    title: 'Launch RF Analysis',
+    description: 'L1/L2/L5, spectrum, spikes, and launch-window ranking.',
+    href: `${backend}/static/launch_analysis.html?v=080`,
+  },
+  {
+    title: 'Data Quality',
+    description: 'Scan validity, filter quality, and evidence checks.',
+    href: `${backend}/static/data_quality.html`,
+  },
+  {
+    title: 'Mission Brief',
+    description: 'Operational summary and decision framing.',
+    href: `${backend}/static/mission_brief.html`,
+  },
+  {
+    title: 'UAS RF',
+    description: 'UAS-specific RF review page.',
+    href: `${backend}/static/uas_rf.html`,
+  },
+  {
+    title: 'v080 Decision Workflow',
+    description: 'Current decision workflow package page.',
+    href: `${backend}/static/moth_v080_decision_workflow.html`,
+  },
+  {
+    title: 'API Docs',
+    description: 'Backend FastAPI documentation.',
+    href: `${backend}/docs`,
+  },
+]
+
+export default function App() {
   return (
     <main className="shell">
       <section className="hero">
@@ -14,49 +63,20 @@ function App() {
         </p>
       </section>
 
-      <section className="grid">
-        <a href={`${backend}/static/home.html`} target="_blank">
-          <strong>Home Dashboard</strong>
-          <span>Main local dashboard entry page.</span>
-        </a>
-
-        <a href={`${backend}/static/briefing.html?v=080`} target="_blank">
-          <strong>Briefing</strong>
-          <span>EEI-style briefing and decision support view.</span>
-        </a>
-
-        <a href={`${backend}/static/launch_analysis.html?v=080`} target="_blank">
-          <strong>Launch RF Analysis</strong>
-          <span>L1/L2/L5, spectrum, spikes, and launch-window ranking.</span>
-        </a>
-
-        <a href={`${backend}/static/data_quality.html`} target="_blank">
-          <strong>Data Quality</strong>
-          <span>Scan validity, filter quality, and evidence checks.</span>
-        </a>
-
-        <a href={`${backend}/static/mission_brief.html`} target="_blank">
-          <strong>Mission Brief</strong>
-          <span>Operational summary and decision framing.</span>
-        </a>
-
-        <a href={`${backend}/static/uas_rf.html`} target="_blank">
-          <strong>UAS RF</strong>
-          <span>UAS-specific RF review page.</span>
-        </a>
-
-        <a href={`${backend}/static/moth_v080_decision_workflow.html`} target="_blank">
-          <strong>v080 Decision Workflow</strong>
-          <span>Current decision workflow package page.</span>
-        </a>
-
-        <a href={`${backend}/docs`} target="_blank">
-          <strong>API Docs</strong>
-          <span>Backend FastAPI documentation.</span>
-        </a>
+      <section className="grid" aria-label="MOTH local pages">
+        {pages.map((page) => (
+          <a
+            className="card"
+            href={page.href}
+            target="_blank"
+            rel="noreferrer"
+            key={page.title}
+          >
+            <strong>{page.title}</strong>
+            <span>{page.description}</span>
+          </a>
+        ))}
       </section>
     </main>
   )
 }
-
-export default App
