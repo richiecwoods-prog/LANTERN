@@ -49,3 +49,13 @@ node_modules/
 dist/
 .vite/
 *.tsbuildinfo
+
+# LANTERN runtime data
+app/moth_pi_setup/data/*
+!app/moth_pi_setup/data/.gitkeep
+app/moth_pi_setup/uploads/
+app/moth_pi_setup/exports/
+app/moth_pi_setup/reports/
+*.sqlite
+*.sqlite3
+*.db

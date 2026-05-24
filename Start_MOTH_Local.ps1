@@ -13,7 +13,6 @@ $env:LANTERN_SCANS_DIR = "C:\MOTH\scans"
 $env:LANTERN_INCOMING_DIR = "C:\MOTH\incoming"
 $env:LANTERN_REPORTS_DIR = "C:\MOTH\reports"
 
-# Compatibility aliases for existing backend code.
 $env:MOTH_ROOT = "C:\MOTH"
 $env:MOTH_SCANS_DIR = "C:\MOTH\scans"
 $env:MOTH_INCOMING_DIR = "C:\MOTH\incoming"
