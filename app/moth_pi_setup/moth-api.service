@@ -1,0 +1,19 @@
+[Unit]
+Description=MOTH Data Analysis API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/woodyrone/moth_pi_setup
+Environment=MOTH_PROJECT_ROOT=/home/woodyrone/moth_pi_setup
+Environment=MOTH_DATA_DIR=/home/woodyrone/moth_pi_setup/data
+Environment=MOTH_DB_PATH=/home/woodyrone/moth_pi_setup/data/moth.sqlite
+Environment=PYTHONPATH=/home/woodyrone/moth_pi_setup
+ExecStart=/home/woodyrone/moth_pi_setup/.venv/bin/python -m uvicorn moth_analysis.api:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=5
+User=woodyrone
+
+[Install]
+WantedBy=multi-user.target

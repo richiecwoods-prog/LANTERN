@@ -1,0 +1,11 @@
+﻿{
+  "folders": [
+    {
+      "name": "LANTERN",
+      "path": "C:\\MOTH"
+    }
+  ],
+  "settings": {
+    "typescript.tsdk": "app/frontend/node_modules/typescript/lib"
+  }
+}

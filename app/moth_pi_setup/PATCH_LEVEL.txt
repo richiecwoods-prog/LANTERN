@@ -1,0 +1,20 @@
+MOTH Pi Analysis App
+Current version: v0.6.0
+Patch: moth_v060_briefing_compare_pdf_patch_20260511
+Status: working baseline
+
+Includes:
+- multi-scan upload and selection
+- small suitability hexagon main view
+- time filtering and timeline assessment
+- L1/L2/L3/L5 frequency presets
+- candidate placement by map click
+- candidate graph
+- candidate assessment
+- one-page candidate report / PDF workflow
+- compare top 3 candidates
+- confidence overlay
+- briefing mode
+- limitations banner
+
+Do not apply older patches over this version.

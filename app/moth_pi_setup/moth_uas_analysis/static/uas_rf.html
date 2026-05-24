@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MOTH UAS RF Launch Window Analysis</title>
+  <style>
+    :root { --bg:#0e1116; --panel:#171b22; --panel2:#10141a; --line:#303844; --text:#e8edf4; --muted:#aeb7c2; --good:#1a9850; --check:#fdae61; --bad:#d73027; --blue:#5aa9ff; --yellow:#ffd166; --violet:#b48cff; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family: system-ui, -apple-system, Segoe UI, sans-serif; }
+    header { padding:14px 18px; border-bottom:1px solid var(--line); background:#0b0e13; display:flex; align-items:center; gap:12px; position:sticky; top:0; z-index:5; }
+    header h1 { font-size:18px; margin:0; flex:1; }
+    .pill { border:1px solid var(--line); color:var(--muted); padding:4px 8px; border-radius:999px; font-size:12px; }
+    main { display:grid; grid-template-columns: 390px 1fr; gap:14px; padding:14px; }
+    section, .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px; box-shadow:0 5px 20px rgba(0,0,0,.22); }
+    h2 { font-size:15px; margin:0 0 10px 0; }
+    h3 { font-size:13px; margin:12px 0 6px 0; color:#fff; }
+    label { display:block; color:var(--muted); font-size:12px; margin-top:8px; }
+    input, select, button { width:100%; padding:8px; border-radius:7px; border:1px solid #424b59; background:#111720; color:var(--text); }
+    select[multiple] { min-height:118px; }
+    button { cursor:pointer; font-weight:700; background:#2a3340; margin-top:8px; touch-action:manipulation; }
+    button:hover { background:#354153; }
+    button.primary { background:#136f35; }
+    button.primary:hover { background:#188844; }
+    .row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .row3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+    .toolbar { display:flex; gap:8px; flex-wrap:wrap; }
+    .toolbar button { width:auto; flex:1; min-width:140px; }
+    .muted { color:var(--muted); font-size:12px; line-height:1.35; }
+    .status { white-space:pre-wrap; background:var(--panel2); border:1px solid #252d36; border-radius:8px; padding:9px; color:#dce5ee; font-size:12px; overflow:auto; }
+    canvas { width:100%; height:300px; background:#0b0f15; border:1px solid #303844; border-radius:10px; display:block; }
+    .cards { display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; }
+    .card { background:#111720; border:1px solid #333c48; border-radius:9px; padding:10px; }
+    .card b { display:block; font-size:20px; margin-bottom:3px; }
+    .good { color:var(--good); } .check { color:var(--check); } .bad { color:var(--bad); }
+    table { width:100%; border-collapse:collapse; font-size:12px; }
+    th, td { padding:6px; border-bottom:1px solid #2b3440; text-align:left; vertical-align:top; }
+    th { color:#cdd6df; }
+    .warn { border-left:5px solid var(--check); background:#211a0b; padding:10px; border-radius:8px; color:#ffe4b0; font-size:13px; }
+    .legend { display:flex; gap:12px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-top:8px; }
+    .sw { width:12px; height:12px; display:inline-block; border-radius:50%; margin-right:4px; vertical-align:-2px; }
+    .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    @media (max-width: 1100px) { main { grid-template-columns:1fr; } .cards { grid-template-columns:1fr; } .grid2 { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+<header>
+  <h1>MOTH UAS RF Launch Window Analysis</h1>
+  <span class="pill">Companion v0.7.0</span>
+  <span class="pill" id="healthPill">checking...</span>
+</header>
+<main>
+  <aside class="panel">
+    <h2>Filters</h2>
+    <div class="warn"><b>Use only for authorised UAS operations.</b><br>This ranks RF-clean windows only. It does not replace airspace clearance, airport/ATC coordination, weather, crew readiness, battery checks, or aircraft safety checks.</div>
+
+    <label>Collections / scans</label>
+    <select id="collections" multiple></select>
+    <div class="toolbar">
+      <button type="button" onclick="selectAllCollections()">Select all</button>
+      <button type="button" onclick="clearCollections()">Clear</button>
+    </div>
+
+    <div class="row">
+      <div><label>Start UTC</label><input id="startUtc" placeholder="optional" /></div>
+      <div><label>End UTC</label><input id="endUtc" placeholder="optional" /></div>
+    </div>
+    <div class="row3">
+      <div><label>Bucket min</label><input id="bucketMinutes" type="number" value="30" min="1" /></div>
+      <div><label>GNSS width MHz</label><input id="gnssWidthMhz" type="number" value="20" min="1" /></div>
+      <div><label>Spike dBm</label><input id="spikeDbm" type="number" value="-60" /></div>
+    </div>
+
+    <h3>Optional target / control-link band</h3>
+    <div class="muted">Use this only if you have an authorised band you want treated as the “connectivity evidence” band. Otherwise launch-window scoring uses RF-cleanliness only.</div>
+    <div class="row">
+      <div><label>Target min Hz</label><input id="targetMinHz" type="number" placeholder="optional" /></div>
+      <div><label>Target max Hz</label><input id="targetMaxHz" type="number" placeholder="optional" /></div>
+    </div>
+
+    <h3>Quick GNSS filters</h3>
+    <div class="toolbar">
+      <button type="button" onclick="setTargetBand(1555420000,1595420000)">L1 ±20 MHz</button>
+      <button type="button" onclick="setTargetBand(1207600000,1247600000)">L2 ±20 MHz</button>
+      <button type="button" onclick="setTargetBand(1156450000,1196450000)">L5 ±20 MHz</button>
+      <button type="button" onclick="setTargetBand(1361050000,1401050000)">L3 ±20 MHz</button>
+      <button type="button" onclick="setTargetBand('', '')">Clear target</button>
+    </div>
+
+    <h3>Actions</h3>
+    <button class="primary" type="button" onclick="refreshAll()">Run full RF analysis</button>
+    <button type="button" onclick="loadGnssTimeline()">Show L1/L2/L5 timeline</button>
+    <button type="button" onclick="loadSpectrum()">Traditional spectrum view</button>
+    <button type="button" onclick="loadLaunchWindows()">Rank clean launch windows</button>
+    <button type="button" onclick="loadPatternOfLife()">Pattern-of-life timing</button>
+
+    <h3>Status</h3>
+    <div id="status" class="status">Ready.</div>
+  </aside>
+
+  <div>
+    <section>
+      <h2>RF-clean launch-window summary</h2>
+      <div class="cards" id="summaryCards">
+        <div class="card"><b>—</b><span class="muted">Best window</span></div>
+        <div class="card"><b>—</b><span class="muted">Score</span></div>
+        <div class="card"><b>—</b><span class="muted">GNSS risk</span></div>
+      </div>
+      <div id="launchText" class="status" style="margin-top:10px">Run launch-window ranking.</div>
+    </section>
+
+    <section style="margin-top:14px">
+      <h2>L1 / L2 / L5 over time</h2>
+      <canvas id="gnssCanvas"></canvas>
+      <div class="legend">
+        <span><span class="sw" style="background:var(--blue)"></span>L1</span>
+        <span><span class="sw" style="background:var(--yellow)"></span>L2</span>
+        <span><span class="sw" style="background:var(--violet)"></span>L5</span>
+        <span class="muted">Shows max dBm per time bucket. Spikes are treated as interference-risk indicators.</span>
+      </div>
+      <div id="gnssText" class="status" style="margin-top:10px">No GNSS timeline loaded.</div>
+    </section>
+
+    <section style="margin-top:14px">
+      <h2>Traditional spectrum analysis</h2>
+      <div class="grid2">
+        <div><canvas id="spectrumCanvas"></canvas></div>
+        <div><canvas id="spikeCanvas"></canvas></div>
+      </div>
+      <div id="spectrumText" class="status" style="margin-top:10px">No spectrum analysis loaded.</div>
+    </section>
+
+    <section style="margin-top:14px">
+      <h2>Recommended clean launch windows</h2>
+      <div id="windowsTable" class="status">No windows ranked yet.</div>
+    </section>
+
+    <section style="margin-top:14px">
+      <h2>Pattern of life over time</h2>
+      <canvas id="polCanvas"></canvas>
+      <div id="polText" class="status" style="margin-top:10px">No pattern-of-life analysis loaded.</div>
+    </section>
+  </div>
+</main>
+<script>
+const api = location.origin;
+const colours = { L1:'#5aa9ff', L2:'#ffd166', L5:'#b48cff', L3:'#ff7ab6' };
+
+function status(msg) { document.getElementById('status').textContent = msg; }
+function esc(s) { return String(s ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+function val(id) { return String(document.getElementById(id).value || '').trim(); }
+function selectedIds() { return Array.from(document.getElementById('collections').selectedOptions).map(o => o.value); }
+function query(extra={}) {
+  const p = new URLSearchParams();
+  const ids = selectedIds();
+  if (ids.length) p.set('collection_ids', ids.join(','));
+  if (val('startUtc')) p.set('start_utc', val('startUtc'));
+  if (val('endUtc')) p.set('end_utc', val('endUtc'));
+  if (val('bucketMinutes')) p.set('bucket_minutes', val('bucketMinutes'));
+  if (val('gnssWidthMhz')) p.set('gnss_width_mhz', val('gnssWidthMhz'));
+  if (val('targetMinHz')) p.set('target_min_hz', val('targetMinHz'));
+  if (val('targetMaxHz')) p.set('target_max_hz', val('targetMaxHz'));
+  for (const [k,v] of Object.entries(extra)) if (v !== undefined && v !== null && v !== '') p.set(k, v);
+  return p.toString();
+}
+async function getJson(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(await r.text());
+  return await r.json();
+}
+function setTargetBand(min,max) { document.getElementById('targetMinHz').value=min; document.getElementById('targetMaxHz').value=max; }
+function selectAllCollections() { for (const o of document.getElementById('collections').options) o.selected = true; }
+function clearCollections() { for (const o of document.getElementById('collections').options) o.selected = false; }
+
+async function loadHealth() {
+  const h = await getJson('/api/health');
+  document.getElementById('healthPill').textContent = h.status === 'ok' ? `v${h.version}` : 'offline';
+}
+async function loadCollections() {
+  const rows = await getJson('/api/collections');
+  const sel = document.getElementById('collections');
+  sel.innerHTML = '';
+  for (const c of rows) {
+    const opt = document.createElement('option');
+    opt.value = c.collection_id;
+    opt.textContent = `#${c.collection_id} ${c.collection_name || 'scan'} (${c.valid_event_count || 0} valid)`;
+    sel.appendChild(opt);
+  }
+}
+
+function prepareCanvas(id) {
+  const canvas = document.getElementById(id);
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(canvas.clientWidth * dpr);
+  canvas.height = Math.floor(canvas.clientHeight * dpr);
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0,0,canvas.clientWidth,canvas.clientHeight);
+  ctx.fillStyle = '#0b0f15'; ctx.fillRect(0,0,canvas.clientWidth,canvas.clientHeight);
+  return {canvas, ctx, w:canvas.clientWidth, h:canvas.clientHeight};
+}
+function axes(ctx,w,h,pad=42) {
+  ctx.strokeStyle = '#45505f'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(pad, 14); ctx.lineTo(pad, h-pad); ctx.lineTo(w-12, h-pad); ctx.stroke();
+}
+function drawNoData(id, text='No data') {
+  const {ctx} = prepareCanvas(id); ctx.fillStyle='#dce5ee'; ctx.font='14px system-ui'; ctx.fillText(text, 18, 32);
+}
+
+function drawGnss(data) {
+  const points = data.points || [];
+  if (!points.length) return drawNoData('gnssCanvas', 'No L1/L2/L5 events for current filters');
+  const {ctx,w,h} = prepareCanvas('gnssCanvas'); const pad=44; axes(ctx,w,h,pad);
+  const labels = ['L1','L2','L5'];
+  const vals=[]; for (const p of points) for (const l of labels) { const v=p.bands?.[l]?.max_dbm; if (v !== null && v !== undefined) vals.push(Number(v)); }
+  const minY = Math.min(...vals, -100), maxY = Math.max(...vals, -55); const span = Math.max(1, maxY-minY);
+  const x = i => pad + (points.length===1 ? 0 : i/(points.length-1))*(w-pad-18);
+  const y = v => h-pad - ((v-minY)/span)*(h-pad-20);
+  ctx.font='12px system-ui'; ctx.fillStyle='#bfc8d3'; ctx.fillText(`${maxY.toFixed(0)} dBm`, 4, 20); ctx.fillText(`${minY.toFixed(0)} dBm`, 4, h-pad);
+  for (const label of labels) {
+    ctx.strokeStyle = colours[label]; ctx.lineWidth = 2; ctx.beginPath(); let started=false;
+    points.forEach((p,i) => { const v=p.bands?.[label]?.max_dbm; if (v===null || v===undefined) return; const xx=x(i), yy=y(Number(v)); if(!started){ctx.moveTo(xx,yy); started=true;} else ctx.lineTo(xx,yy); }); ctx.stroke();
+  }
+  document.getElementById('gnssText').textContent = `GNSS timeline: ${points.length} time buckets. ${data.interpretation}`;
+}
+
+function drawSpectrum(data) {
+  const bins = data.bins || [];
+  if (!bins.length) return drawNoData('spectrumCanvas', 'No spectrum events for current filters');
+  const {ctx,w,h} = prepareCanvas('spectrumCanvas'); const pad=42; axes(ctx,w,h,pad);
+  const maxCount = Math.max(...bins.map(b=>b.event_count),1);
+  const barW = Math.max(1, (w-pad-16)/bins.length);
+  bins.forEach((b,i)=>{ const bh = (b.event_count/maxCount)*(h-pad-20); ctx.fillStyle = b.abnormal ? '#d73027' : '#5aa9ff'; ctx.fillRect(pad+i*barW, h-pad-bh, Math.max(1,barW-1), bh); });
+  ctx.fillStyle='#dce5ee'; ctx.font='12px system-ui'; ctx.fillText('Event count by frequency bin; red = abnormal', pad, 18);
+  const abnormal = bins.filter(b=>b.abnormal).slice(0,12);
+  document.getElementById('spectrumText').textContent = `Spectrum bins: ${bins.length}; abnormal bins: ${bins.filter(b=>b.abnormal).length}\nTop abnormal bins:\n` + abnormal.map(b=>`${b.frequency_mhz} MHz: ${b.abnormal_reason}, max ${b.max_dbm} dBm, ${b.event_count} events`).join('\n');
+}
+function drawSpikes(data) {
+  const spikes = data.spikes || [];
+  if (!spikes.length) return drawNoData('spikeCanvas', 'No spikes above threshold');
+  const {ctx,w,h} = prepareCanvas('spikeCanvas'); const pad=42; axes(ctx,w,h,pad);
+  const xs = [...new Set(spikes.map(s=>s.bucket_start_utc))];
+  const ys = [...new Set(spikes.map(s=>s.frequency_mhz))].sort((a,b)=>a-b);
+  const minF = Math.min(...ys), maxF = Math.max(...ys), spanF=Math.max(1,maxF-minF);
+  const x = t => pad + (xs.indexOf(t)/Math.max(1,xs.length-1))*(w-pad-18);
+  const y = f => h-pad - ((f-minF)/spanF)*(h-pad-20);
+  for (const s of spikes.slice(0,3000)) { ctx.fillStyle = s.max_dbm >= -50 ? '#d73027' : '#fdae61'; ctx.beginPath(); ctx.arc(x(s.bucket_start_utc), y(s.frequency_mhz), 3, 0, Math.PI*2); ctx.fill(); }
+  ctx.fillStyle='#dce5ee'; ctx.font='12px system-ui'; ctx.fillText('Spikes over time/frequency', pad, 18);
+}
+function drawPOL(data) {
+  const hours = data.hourly || [];
+  if (!hours.length) return drawNoData('polCanvas', 'No pattern-of-life data');
+  const {ctx,w,h} = prepareCanvas('polCanvas'); const pad=42; axes(ctx,w,h,pad);
+  const maxCount = Math.max(...hours.map(x=>x.event_count),1); const barW=(w-pad-16)/24;
+  hours.forEach((hr,i)=>{ const bh=(hr.event_count/maxCount)*(h-pad-20); const sc=hr.cleanliness_score_0_100; ctx.fillStyle=sc>=75?'#1a9850':sc>=50?'#fdae61':'#d73027'; ctx.fillRect(pad+i*barW, h-pad-bh, Math.max(1,barW-2), bh); });
+  ctx.fillStyle='#dce5ee'; ctx.font='12px system-ui'; ctx.fillText('Hourly RF pattern of life (UTC)', pad, 18);
+  const clean = [...hours].sort((a,b)=>b.cleanliness_score_0_100-a.cleanliness_score_0_100).slice(0,5);
+  document.getElementById('polText').textContent = `${data.interpretation}\nCleanest hours UTC:\n` + clean.map(h=>`${String(h.hour_utc).padStart(2,'0')}:00 — score ${h.cleanliness_score_0_100}, events ${h.event_count}, max ${h.max_dbm ?? 'n/a'} dBm`).join('\n');
+}
+
+async function loadGnssTimeline() { status('Loading L1/L2/L5 timeline...'); const data = await getJson(`/api/gnss-timeline?${query({width_mhz:val('gnssWidthMhz')||20})}`); drawGnss(data); status('GNSS timeline loaded.'); }
+async function loadSpectrum() { status('Loading spectrum and spikes...'); const min=val('targetMinHz'), max=val('targetMaxHz'); const data = await getJson(`/api/spectrum?${query({min_hz:min,max_hz:max,bin_mhz:1})}`); drawSpectrum(data); const spikes=await getJson(`/api/spikes?${query({min_hz:min,max_hz:max,bin_mhz:5,spike_dbm:val('spikeDbm')||-60})}`); drawSpikes(spikes); status('Spectrum analysis loaded.'); }
+async function loadPatternOfLife() { status('Loading pattern of life...'); const min=val('targetMinHz'), max=val('targetMaxHz'); const data = await getJson(`/api/pattern-of-life?${query({min_hz:min,max_hz:max})}`); drawPOL(data); status('Pattern-of-life analysis loaded.'); }
+async function loadLaunchWindows() {
+  status('Ranking RF-clean launch windows...');
+  const data = await getJson(`/api/launch-windows?${query({})}`);
+  const top = data.top_windows || [];
+  const best = top[0];
+  document.getElementById('summaryCards').innerHTML = best ? `
+    <div class="card"><b>${esc(best.bucket_start_utc)}</b><span class="muted">Best window UTC</span></div>
+    <div class="card"><b class="${best.clean_launch_score_0_100>=75?'good':best.clean_launch_score_0_100>=50?'check':'bad'}">${best.clean_launch_score_0_100}/100</b><span class="muted">RF-clean score</span></div>
+    <div class="card"><b>${best.gnss_event_count} events</b><span class="muted">GNSS-band risk events</span></div>` : `<div class="card"><b>—</b><span>No windows</span></div>`;
+  document.getElementById('launchText').textContent = data.definition + '\n\nLimitations:\n' + (data.limitations||[]).map(x=>'- '+x).join('\n');
+  document.getElementById('windowsTable').innerHTML = top.length ? `<table><tr><th>Window UTC</th><th>Score</th><th>Recommendation</th><th>GNSS events</th><th>Max GNSS dBm</th><th>Reasons</th></tr>` + top.map(w=>`<tr><td>${esc(w.bucket_start_utc)} → ${esc(w.bucket_end_utc)}</td><td>${w.clean_launch_score_0_100}</td><td>${esc(w.recommendation)}</td><td>${w.gnss_event_count}</td><td>${w.gnss_max_dbm ?? ''}</td><td>${esc((w.reasons||[]).join('; '))}</td></tr>`).join('') + `</table>` : 'No launch windows returned.';
+  status('Launch-window ranking loaded.');
+}
+async function refreshAll() { await Promise.all([loadGnssTimeline(), loadSpectrum(), loadLaunchWindows(), loadPatternOfLife()]); }
+
+document.addEventListener('click', e=>{ const b=e.target.closest && e.target.closest('button'); if(b) b.blur(); }, true);
+(async function init(){ try { await loadHealth(); await loadCollections(); status('Ready. Select scans or leave blank for all scans, then run RF analysis.'); } catch(e) { status('Startup failed: '+e.message); } })();
+</script>
+</body>
+</html>

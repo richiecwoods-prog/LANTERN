@@ -1,13 +1,22 @@
-﻿$Root = "C:\MOTH\app\moth_pi_setup"
+﻿$ErrorActionPreference = "Stop"
 
-$MainCmd = "cd `"$Root`"; .\.venv\Scripts\Activate.ps1; python -m uvicorn moth_analysis.api:app --host 127.0.0.1 --port 8000"
-$CompanionCmd = "cd `"$Root`"; .\.venv\Scripts\Activate.ps1; python -m uvicorn moth_uas_analysis.companion_api:app --host 127.0.0.1 --port 8010"
+Set-Location "C:\MOTH\app\moth_pi_setup"
 
-Start-Process powershell.exe -ArgumentList "-NoExit", "-ExecutionPolicy", "Bypass", "-Command", $MainCmd
-Start-Sleep -Seconds 3
+if (Test-Path "C:\MOTH\app\.venv\Scripts\Activate.ps1") {
+  . "C:\MOTH\app\.venv\Scripts\Activate.ps1"
+}
 
-Start-Process powershell.exe -ArgumentList "-NoExit", "-ExecutionPolicy", "Bypass", "-Command", $CompanionCmd
-Start-Sleep -Seconds 4
+New-Item -ItemType File -Force "C:\MOTH\app\moth_pi_setup\moth_analysis\__init__.py" | Out-Null
 
-Start-Process "http://127.0.0.1:8000/?v=local"
-Start-Process "http://127.0.0.1:8000/static/launch_analysis.html?v=local"
+$env:LANTERN_ROOT = "C:\MOTH"
+$env:LANTERN_SCANS_DIR = "C:\MOTH\scans"
+$env:LANTERN_INCOMING_DIR = "C:\MOTH\incoming"
+$env:LANTERN_REPORTS_DIR = "C:\MOTH\reports"
+
+# Compatibility aliases for existing backend code.
+$env:MOTH_ROOT = "C:\MOTH"
+$env:MOTH_SCANS_DIR = "C:\MOTH\scans"
+$env:MOTH_INCOMING_DIR = "C:\MOTH\incoming"
+$env:MOTH_REPORTS_DIR = "C:\MOTH\reports"
+
+python -m uvicorn moth_analysis.api:app --host 127.0.0.1 --port 8000 --reload
