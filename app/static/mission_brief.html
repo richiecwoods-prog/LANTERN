@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MOTH RF Mission Brief</title>
+  <style>
+    :root{--bg:#0b1118;--panel:#121922;--border:#2b3a4f;--text:#eef4ff;--muted:#aab8ce;--good:#2fbf71;--check:#f0b429;--poor:#f25f5c;--blue:#4aa3ff;}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif;}
+    header{padding:14px 20px;border-bottom:1px solid var(--border);background:#101722;}
+    h1{margin:0;font-size:22px} h2{margin:0 0 12px;font-size:18px} h3{margin:10px 0 6px;font-size:14px}
+    .layout{display:grid;grid-template-columns:355px 1fr;gap:14px;padding:14px}.card,.side{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:14px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}.big{font-size:26px;font-weight:700}.good{color:var(--good)}.check{color:var(--check)}.poor{color:var(--poor)}.muted,.small{color:var(--muted);font-size:12px} label{display:block;color:#cfe0ff;font-size:12px;margin-top:10px} input,select,button{width:100%;box-sizing:border-box;border-radius:6px;border:1px solid #41546e;background:#0d141d;color:var(--text);padding:8px}button{cursor:pointer;font-weight:700;margin-top:8px;background:#19324c}.primary{background:#1b8f52}.warning{background:#6f4e00}.danger{background:#6b2222} table{width:100%;border-collapse:collapse;font-size:12px} td,th{border-bottom:1px solid #2a384a;padding:6px;text-align:left;vertical-align:top} th{color:#d8e7ff}.status-good{border-left:5px solid var(--good)}.status-check{border-left:5px solid var(--check)}.status-poor{border-left:5px solid var(--poor)}.pill{display:inline-block;padding:4px 7px;border-radius:999px;background:#26384e;margin:2px;font-size:11px}.notice{border-left:5px solid var(--blue);padding:10px;background:#0f1d2d;border-radius:6px;margin:8px 0}.print-note{font-size:11px;color:var(--muted)}
+    @media(max-width:1000px){.layout,.grid2,.grid3{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<header>
+  <h1>MOTH RF Mission Brief <span class="pill">v0.9.2</span></h1>
+  <div class="muted">Decision workflow with GPS-time sanity, day/week/month pattern-of-life analysis and JSP 101-aligned report output. Place names suppressed; use AOI, grid references or lat/long.</div>
+</header>
+<div class="layout">
+  <aside class="side">
+    <h2>Mission setup</h2>
+    <label>Selected collection IDs</label><input id="collectionIds" placeholder="blank = all scans; e.g. 1,2,3" />
+    <label>Frequency preset</label><select id="preset" onchange="applyPreset()"><option value="all">Custom / all</option><option value="l1">L1</option><option value="l2">L2</option><option value="l3">L3</option><option value="l5">L5</option><option value="mothgnss">GNSS 1.15-1.62 GHz</option><option value="1150_1300">1150-1300 MHz</option></select>
+    <div class="grid2"><div><label>Target min Hz</label><input id="targetMinHz" placeholder="optional" /></div><div><label>Target max Hz</label><input id="targetMaxHz" placeholder="optional" /></div></div>
+
+    <h3>GPS-time sanity</h3>
+    <div class="grid2"><div><label>Valid start UTC</label><input id="validStartUtc" placeholder="auto or YYYY-MM-DDTHH:MM:SSZ" /></div><div><label>Valid end UTC</label><input id="validEndUtc" placeholder="auto or YYYY-MM-DDTHH:MM:SSZ" /></div></div>
+    <button class="warning" onclick="checkTimeSanity(true)">Check and suggest valid time range</button>
+    <div class="small">Use this when MOTH GPS time has reset by years or decades.</div>
+
+    <h3>Launch timing settings</h3>
+    <div class="grid2"><div><label>Duration minutes</label><input id="durationMinutes" value="30" /></div><div><label>Step minutes</label><input id="stepMinutes" value="10" /></div></div>
+    <div class="grid2"><div><label>GNSS window MHz</label><input id="widthMhz" value="40" /></div><div><label>Spike threshold dBm</label><input id="spikeDbm" value="-60" /></div></div>
+
+    <h3>Optional connectivity band</h3>
+    <div class="grid2"><div><label>Connectivity min Hz</label><input id="connMin" placeholder="optional" /></div><div><label>Connectivity max Hz</label><input id="connMax" placeholder="optional" /></div></div>
+    <label>Candidate radius m</label><input id="radiusM" value="1500" />
+    <label>Max rows</label><input id="maxRows" value="500000" />
+
+    <h3>Pattern-of-life</h3>
+    <label>Analysis level</label><select id="period"><option value="day">Day-on-day</option><option value="week">Week-on-week</option><option value="month">Month-on-month</option></select>
+    <button onclick="runPatterns()">Run pattern-of-life analysis</button>
+
+    <button class="primary" onclick="runMissionBrief()">Create RF Mission Brief</button>
+    <button onclick="checkReadiness()">Check readiness only</button>
+    <button onclick="openJspReport()">Open JSP 101-style report</button>
+    <div class="print-note">Open the report, then use browser Print / Save as PDF.</div>
+  </aside>
+
+  <main>
+    <div class="card" id="topCard"><h2>Mission result</h2><p class="muted">Run the mission brief to generate a decision view.</p></div>
+    <div class="grid3">
+      <div class="card" id="readinessCard"><h2>RF Readiness</h2><div class="big">Not run</div><p class="muted">GOOD / CHECK / POOR gate.</p></div>
+      <div class="card" id="launchCard"><h2>Launch timing</h2><div class="big">Not run</div><p class="muted">Recommended, best viable or least-busy observed.</p></div>
+      <div class="card" id="candidateCard"><h2>Antenna candidate</h2><div class="big">Not run</div><p class="muted">Top ranked candidate site.</p></div>
+    </div>
+    <div class="grid2">
+      <div class="card"><h2>GPS-time sanity</h2><div id="timeSanity" class="muted">Not checked yet.</div></div>
+      <div class="card"><h2>Operator brief</h2><div id="briefText" class="muted">No brief yet.</div></div>
+    </div>
+    <div class="card"><h2>Pattern of life</h2><div class="notice">Use day-on-day first. As data grows, use week-on-week and month-on-month to reveal regular RF behaviour. Rows with bad GPS-derived dates are excluded when a valid UTC range is set.</div><div id="patterns">No pattern analysis yet.</div></div>
+    <div class="card"><h2>Required caveats</h2><ul id="limitations"><li>This tool supports RF planning only.</li><li>It does not authorise UAS launch.</li></ul></div>
+    <div class="card"><h2>Readiness checks</h2><div id="checks">No checks yet.</div></div>
+    <div class="card"><h2>Top candidates</h2><div id="candidates">No candidates scored yet.</div></div>
+    <div class="card"><h2>Traceability</h2><div id="trace" class="small">No traceability bundle yet.</div></div>
+  </main>
+</div>
+<script>
+const api = location.origin;
+let lastQuery = '';
+function esc(x){return String(x??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+function val(id){return String(document.getElementById(id).value||'').trim();}
+function applyPreset(){const p=val('preset'),min=document.getElementById('targetMinHz'),max=document.getElementById('targetMaxHz');if(p==='l1'){min.value=1555420000;max.value=1595420000}else if(p==='l2'){min.value=1207600000;max.value=1247600000}else if(p==='l3'){min.value=1361050000;max.value=1401050000}else if(p==='l5'){min.value=1156450000;max.value=1196450000}else if(p==='mothgnss'){min.value=1150000000;max.value=1620000000}else if(p==='1150_1300'){min.value=1150000000;max.value=1300000000}else{min.value='';max.value=''}}
+function buildQuery(){const q=new URLSearchParams(); if(val('collectionIds'))q.set('collection_ids',val('collectionIds')); if(val('targetMinHz'))q.set('target_min_hz',val('targetMinHz')); if(val('targetMaxHz'))q.set('target_max_hz',val('targetMaxHz')); if(val('validStartUtc'))q.set('start_utc',val('validStartUtc')); if(val('validEndUtc'))q.set('end_utc',val('validEndUtc')); if(val('durationMinutes'))q.set('duration_minutes',val('durationMinutes')); if(val('stepMinutes'))q.set('step_minutes',val('stepMinutes')); if(val('widthMhz'))q.set('width_mhz',val('widthMhz')); if(val('spikeDbm'))q.set('spike_dbm',val('spikeDbm')); if(val('connMin'))q.set('connectivity_min_hz',val('connMin')); if(val('connMax'))q.set('connectivity_max_hz',val('connMax')); if(val('radiusM'))q.set('radius_m',val('radiusM')); if(val('maxRows'))q.set('max_rows',val('maxRows')); lastQuery=q.toString(); return lastQuery;}
+async function getJson(url){const r=await fetch(url); if(!r.ok)throw new Error(await r.text()); return await r.json();}
+function statusClass(x){x=String(x||'').toUpperCase();return x==='GOOD'||x==='RECOMMENDED'?'good':x==='CHECK'||x==='BEST VIABLE'||x==='LEAST-BUSY OBSERVED'?'check':'poor'}
+function renderChecks(checks){if(!checks||!checks.length)return 'No checks returned.';return `<table><tr><th>Check</th><th>Status</th><th>Reason</th><th>Action</th></tr>${checks.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.status)}</td><td>${esc(c.reason)}</td><td>${esc(c.action)}</td></tr>`).join('')}</table>`}
+function renderCandidates(cands){if(!cands||!cands.length)return 'No scored candidates returned.';return `<table><tr><th>Rank</th><th>Name</th><th>Score</th><th>Confidence</th></tr>${cands.map(c=>`<tr><td>${esc(c.rank??'')}</td><td>${esc(c.name??'')}</td><td>${esc(c.score_0_100??'')}</td><td>${esc(c.data_confidence??'')}</td></tr>`).join('')}</table>`}
+async function checkTimeSanity(fill=false){try{const q=new URLSearchParams();if(val('collectionIds'))q.set('collection_ids',val('collectionIds')); if(val('validStartUtc'))q.set('sane_start_utc',val('validStartUtc')); if(val('validEndUtc'))q.set('sane_end_utc',val('validEndUtc')); if(val('maxRows'))q.set('max_rows',val('maxRows')); const data=await getJson(`${api}/api/mission/time-sanity?${q.toString()}`); document.getElementById('timeSanity').innerHTML=`<p><b>${esc(data.confidence)}</b>: ${esc(data.plain_summary)}</p><p>Suggested UTC range: ${esc(data.recommended_start_utc)} to ${esc(data.recommended_end_utc)}</p><p>Bad/missing timestamp rows: ${esc((data.bad_or_out_of_range_timestamp_rows||0)+(data.missing_or_unparseable_timestamp_rows||0))}</p>`; if(fill){if(!val('validStartUtc')&&data.recommended_start_utc)document.getElementById('validStartUtc').value=data.recommended_start_utc;if(!val('validEndUtc')&&data.recommended_end_utc)document.getElementById('validEndUtc').value=data.recommended_end_utc}}catch(e){document.getElementById('timeSanity').textContent=`Time sanity check failed: ${e.message}`}}
+async function runPatterns(){try{const q=buildQuery(); const data=await getJson(`${api}/api/mission/pattern-of-life?period=${encodeURIComponent(val('period')||'day')}&${q}`); const top=(data.quietest_periods||[]); const table=`<table><tr><th>Period</th><th>Status</th><th>Score</th><th>Events</th><th>Spikes</th><th>L1/L2/L3/L5</th><th>Max dBm</th></tr>${top.map(r=>`<tr><td>${esc(r.period)}</td><td>${esc(r.status)}</td><td>${esc(r.cleanliness_score_0_100)}</td><td>${esc(r.event_count)}</td><td>${esc(r.spike_count)}</td><td>${esc(r.l1_count)}/${esc(r.l2_count)}/${esc(r.l3_count)}/${esc(r.l5_count)}</td><td>${esc(r.max_dbm)}</td></tr>`).join('')}</table>`; document.getElementById('patterns').innerHTML=`<p><b>${esc(data.analysis_type)}</b>. ${esc(data.definition)}</p><p>Rows used: ${esc(data.rows_used)}; bad GPS-time rows excluded: ${esc(data.bad_or_out_of_range_time_rows_excluded)}</p>${table}`;}catch(e){document.getElementById('patterns').textContent=`Pattern analysis failed: ${e.message}`}}
+async function checkReadiness(){document.getElementById('topCard').innerHTML='<h2>Checking readiness...</h2><p class="muted">Running data quality, candidate and launch-window checks.</p>'; const data=await getJson(`${api}/api/mission/readiness?${buildQuery()}`); renderReadiness(data);}
+function renderReadiness(data){const r=data.readiness||'NO DATA',cls=statusClass(r);document.getElementById('readinessCard').className=`card status-${cls}`;document.getElementById('readinessCard').innerHTML=`<h2>RF Readiness</h2><div class="big ${cls}">${esc(r)}</div><p>${esc(data.summary||'')}</p>`;const win=data.best_launch_window||{};const wl=win.recommendation_type||'NO DATA',wcls=statusClass(wl);document.getElementById('launchCard').className=`card status-${wcls}`;document.getElementById('launchCard').innerHTML=`<h2>Launch timing</h2><div class="big ${wcls}">${esc(wl)}</div><p>${esc(win.start_utc||'')} to ${esc(win.end_utc||'')} UTC<br>Score: ${esc(win.score_0_100??'n/a')}/100</p>`;const cand=(data.top_candidates||[])[0]||{};document.getElementById('candidateCard').innerHTML=`<h2>Antenna candidate</h2><div class="big">${esc(cand.name||'No scored candidate')}</div><p>Score: ${esc(cand.score_0_100??'n/a')} / Confidence: ${esc(cand.data_confidence??'n/a')}</p>`;document.getElementById('checks').innerHTML=renderChecks(data.checks||[]);document.getElementById('candidates').innerHTML=renderCandidates(data.top_candidates||[])}
+async function runMissionBrief(){document.getElementById('topCard').innerHTML='<h2>Creating mission brief...</h2><p class="muted">This may take a moment on the Pi.</p>'; await checkTimeSanity(false); const data=await getJson(`${api}/api/mission/brief?${buildQuery()}`); renderReadiness(data.readiness||{}); const op=data.operator_brief||{}; document.getElementById('topCard').innerHTML=`<h2>Mission result</h2><p><b>${esc(op.headline||'No headline')}</b></p><p>${esc(op.candidate_line||'')}</p>`; document.getElementById('briefText').innerHTML=`<p><b>${esc(op.headline||'')}</b></p><p>${esc(op.candidate_line||'')}</p><h3>Why</h3><ul>${(op.rationale||[]).map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`; document.getElementById('limitations').innerHTML=(op.limitations||[]).map(x=>`<li>${esc(x)}</li>`).join(''); document.getElementById('trace').textContent=JSON.stringify(data.ai_handoff||{},null,2); await runPatterns();}
+function openJspReport(){const q=buildQuery(); window.open(`${api}/api/mission/report-jsp101.html?period=${encodeURIComponent(val('period')||'day')}&${q}`,'_blank')}
+(async()=>{try{const h=await getJson(`${api}/api/mission/health`);document.getElementById('trace').textContent=`Mission API ready: ${h.mission_version}`; await checkTimeSanity(false);}catch(e){document.getElementById('trace').textContent=`Mission API not available: ${e.message}`;}})();
+</script>
+</body>
+</html>

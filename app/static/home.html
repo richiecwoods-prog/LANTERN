@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MOTH Pi UX Home</title>
+  <style>
+    :root{--bg:#0f1418;--panel:#182128;--panel2:#202b34;--text:#f3f6f8;--muted:#aab8c2;--blue:#2d7fb8;--green:#1f8f4d;--amber:#c9831d;--red:#b43a35;--line:#34434d;}
+    body{margin:0;background:linear-gradient(135deg,#0d1115,#17222a);font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:var(--text)}
+    header{padding:28px 36px;border-bottom:1px solid var(--line);background:rgba(0,0,0,.25)}
+    h1{margin:0 0 8px;font-size:30px} h2{margin:0 0 10px;font-size:20px} p{line-height:1.45}.muted{color:var(--muted)}
+    main{padding:28px 36px;max-width:1250px;margin:auto}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px}.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:0 8px 30px rgba(0,0,0,.25)}
+    .card.primary{border-color:#3a8c56;background:linear-gradient(180deg,#193323,#14221b)}.button{display:inline-block;margin-top:12px;padding:11px 14px;border-radius:8px;background:var(--blue);color:white;text-decoration:none;font-weight:700}.button.green{background:var(--green)}.button.amber{background:var(--amber)}.button.gray{background:#3a4650}
+    .status{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;margin:20px 0}.pill{display:inline-block;padding:4px 9px;border-radius:99px;font-size:12px;background:#2b3943;color:#dfe7eb;font-weight:700}.good{background:var(--green)}.check{background:var(--amber)}.bad{background:var(--red)}
+    table{width:100%;border-collapse:collapse;font-size:14px}td,th{border-bottom:1px solid var(--line);padding:8px;text-align:left}.footer{margin-top:24px;color:var(--muted);font-size:13px}
+  </style>
+</head>
+<body>
+<header>
+  <h1>MOTH Pi Analysis App <span class="pill">UX v0.8.0</span></h1>
+  <div class="muted">Decision-first home screen for antenna placement, launch-window analysis, data quality and reports.</div>
+</header>
+<main>
+  <section class="status" id="statusCards">
+    <div class="card"><h2>Loading status...</h2><p class="muted">Checking API and data quality.</p></div>
+  </section>
+
+  <section class="grid">
+    <div class="card primary">
+      <h2>Briefing Mode</h2>
+      <p>Start here for a simple decision-led view: recommendation, confidence, why, and next action.</p>
+      <a class="button green" href="/static/briefing.html?v=080">Open Briefing Mode</a>
+    </div>
+    <div class="card">
+      <h2>Antenna Placement</h2>
+      <p>Use map hexagons, candidates, top-three comparison and candidate reports.</p>
+      <a class="button" href="/?v=060">Open Main Dashboard</a>
+    </div>
+    <div class="card">
+      <h2>Launch Window</h2>
+      <p>Find recommended, best viable or least-busy observed RF timing using L1/L2/L5 and spectrum checks.</p>
+      <a class="button amber" href="/static/launch_analysis.html?v=075">Open Launch RF Dashboard</a>
+    </div>
+    <div class="card">
+      <h2>Data Quality</h2>
+      <p>Check whether the scans are reliable enough before briefing conclusions.</p>
+      <a class="button gray" href="/static/data_quality.html?v=080">Open Data Quality</a>
+    </div>
+  </section>
+
+  <section class="card" style="margin-top:20px">
+    <h2>Recommended workflow</h2>
+    <table>
+      <tr><th>Step</th><th>Action</th><th>Why</th></tr>
+      <tr><td>1</td><td>Check Data Quality</td><td>Prevents over-trusting sparse or biased survey data.</td></tr>
+      <tr><td>2</td><td>Use Briefing Mode</td><td>Shows the answer before technical detail.</td></tr>
+      <tr><td>3</td><td>Use Analyst pages</td><td>Map, spectrum, timelines and candidate graphs explain why.</td></tr>
+      <tr><td>4</td><td>Generate reports</td><td>Converts the result into a one-page decision brief.</td></tr>
+    </table>
+  </section>
+
+  <div class="footer">Operational caveat: this tool supports authorised planning. It does not authorise flight or guarantee link/GNSS performance.</div>
+
+<a class="card" href="/static/mission_brief.html?v=090">
+  <h2>Create RF Mission Brief</h2>
+  <p>Guided readiness, antenna candidate, launch timing and one-page report workflow.</p>
+</a>
+
+</main>
+<script>
+const api = location.origin;
+function pillClass(status){status=String(status||'').toUpperCase(); if(['GOOD','RECOMMENDED','BEST VIABLE'].includes(status)) return 'good'; if(['MEDIUM','CHECK','LEAST-BUSY OBSERVED','QUIET BUT UNPROVEN'].includes(status)) return 'check'; return 'bad'}
+async function getJson(u){const r=await fetch(u); if(!r.ok) throw new Error(await r.text()); return r.json()}
+async function load(){
+  try{
+    const [ux,dq,cards]=await Promise.all([getJson('/api/ux/health'),getJson('/api/ux/data-quality'),getJson('/api/ux/decision-cards')]);
+    document.getElementById('statusCards').innerHTML = `
+      <div class="card"><h2>Data quality <span class="pill ${pillClass(dq.quality_level)}">${dq.quality_level}</span></h2><p>${dq.headline}</p><p class="muted">Score ${dq.score_0_100}/100; valid rows ${dq.valid_percent}%.</p></div>
+      <div class="card"><h2>Antenna candidate <span class="pill ${pillClass(cards.candidate.status)}">${cards.candidate.status}</span></h2><p>${cards.candidate.headline}</p><p class="muted">${cards.candidate.reason}</p></div>
+      <div class="card"><h2>Launch timing <span class="pill ${pillClass(cards.launch.status)}">${cards.launch.status}</span></h2><p>${cards.launch.headline}</p><p class="muted">${cards.launch.reason}</p></div>`;
+  }catch(e){document.getElementById('statusCards').innerHTML=`<div class="card"><h2>Status unavailable</h2><p>${e.message}</p></div>`}
+}
+load();
+</script>
+</body>
+</html>
