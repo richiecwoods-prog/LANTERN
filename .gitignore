@@ -1,0 +1,39 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# Environment/secrets
+.env
+.env.*
+*.key
+*.pem
+
+# Logs/cache
+*.log
+.cache/
+.pytest_cache/
+
+# Windows/macOS
+Thumbs.db
+.DS_Store
+
+# Operational data - keep folders, ignore contents
+backups/*
+incoming/*
+reports/*
+scans/*
+
+!backups/.gitkeep
+!incoming/.gitkeep
+!reports/.gitkeep
+!scans/.gitkeep
+
+# Local databases / generated state
+*.db
+*.sqlite
+*.sqlite3
