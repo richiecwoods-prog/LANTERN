@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import csv
 import math
@@ -187,28 +187,58 @@ def do_import(
 ) -> dict[str, Any]:
     dest = save_upload_file(file)
 
-    # LANTERN import quality gate - shadow mode.
-    # This records quality/filter statistics but still imports the original CSV.
+    # LANTERN import quality gate.
+    #
+    # Default behaviour is shadow mode:
+    #   - save the original upload
+    #   - calculate and store quality/filter summary
+    #   - import the original CSV unchanged
+    #
+    # Set LANTERN_IMPORT_QUALITY_MODE=clean to import a cleaned copy after
+    # the quality summary has been proven against real field data.
+    quality_mode = os.getenv("LANTERN_IMPORT_QUALITY_MODE", "shadow").strip().lower()
+    import_path = dest
     quality_summary: dict[str, Any] | None = None
 
     try:
-        _raw_df, _cleaned_df, quality_summary = load_and_clean_csv(
+        raw_df, cleaned_df, quality_summary = load_and_clean_csv(
             dest,
             source_file=Path(file.filename or dest.name).name,
-            mode="shadow",
+            mode=quality_mode or "shadow",
         )
         save_quality_summary(DB_PATH, quality_summary)
+
+        if quality_mode in {"clean", "active", "standard"}:
+            original_columns = [column for column in raw_df.columns if column in cleaned_df.columns]
+
+            if not original_columns:
+                raise ValueError("Quality gate could not identify original CSV columns for cleaned import.")
+
+            cleaned_for_import = cleaned_df[original_columns].copy()
+            clean_dest = dest.with_name(f"{dest.stem}__quality_cleaned{dest.suffix}")
+            counter = 1
+
+            while clean_dest.exists():
+                clean_dest = dest.with_name(f"{dest.stem}__quality_cleaned_{counter}{dest.suffix}")
+                counter += 1
+
+            cleaned_for_import.to_csv(clean_dest, index=False)
+            import_path = clean_dest
+
     except Exception as exc:
+        # Never break CSV import just because the quality summary failed.
+        # The backend terminal will show the warning while normal import continues.
         print(f"[LANTERN quality gate] warning: {exc}")
         quality_summary = {
             "ok": False,
             "source_file": Path(file.filename or dest.name).name,
+            "mode": quality_mode or "shadow",
             "error": str(exc),
         }
 
     try:
         result = insert_collection_from_csv(
-            dest,
+            import_path,
             collection_name=collection_name,
             device_serial=device_serial,
             firmware_version=firmware_version,
@@ -223,8 +253,12 @@ def do_import(
         )
 
         if isinstance(result, dict):
-            result["quality_mode"] = "shadow"
+            result["quality_mode"] = quality_mode or "shadow"
             result["quality_summary"] = quality_summary
+
+            if import_path != dest:
+                result["original_upload_path"] = str(dest)
+                result["quality_cleaned_import_path"] = str(import_path)
 
         return result
 
