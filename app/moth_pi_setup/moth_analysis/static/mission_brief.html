@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -12,6 +12,7 @@
     .layout{display:grid;grid-template-columns:355px 1fr;gap:14px;padding:14px}.card,.side{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:14px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}.big{font-size:26px;font-weight:700}.good{color:var(--good)}.check{color:var(--check)}.poor{color:var(--poor)}.muted,.small{color:var(--muted);font-size:12px} label{display:block;color:#cfe0ff;font-size:12px;margin-top:10px} input,select,button{width:100%;box-sizing:border-box;border-radius:6px;border:1px solid #41546e;background:#0d141d;color:var(--text);padding:8px}button{cursor:pointer;font-weight:700;margin-top:8px;background:#19324c}.primary{background:#1b8f52}.warning{background:#6f4e00}.danger{background:#6b2222} table{width:100%;border-collapse:collapse;font-size:12px} td,th{border-bottom:1px solid #2a384a;padding:6px;text-align:left;vertical-align:top} th{color:#d8e7ff}.status-good{border-left:5px solid var(--good)}.status-check{border-left:5px solid var(--check)}.status-poor{border-left:5px solid var(--poor)}.pill{display:inline-block;padding:4px 7px;border-radius:999px;background:#26384e;margin:2px;font-size:11px}.notice{border-left:5px solid var(--blue);padding:10px;background:#0f1d2d;border-radius:6px;margin:8px 0}.print-note{font-size:11px;color:var(--muted)}
     @media(max-width:1000px){.layout,.grid2,.grid3{grid-template-columns:1fr}}
   </style>
+  <link rel="stylesheet" href="/static/lantern_nav.css" />
 </head>
 <body>
 <header>
@@ -86,5 +87,7 @@ async function runMissionBrief(){document.getElementById('topCard').innerHTML='<
 function openJspReport(){const q=buildQuery(); window.open(`${api}/api/mission/report-jsp101.html?period=${encodeURIComponent(val('period')||'day')}&${q}`,'_blank')}
 (async()=>{try{const h=await getJson(`${api}/api/mission/health`);document.getElementById('trace').textContent=`Mission API ready: ${h.mission_version}`; await checkTimeSanity(false);}catch(e){document.getElementById('trace').textContent=`Mission API not available: ${e.message}`;}})();
 </script>
+  <script src="/static/lantern_nav.js"></script>
 </body>
 </html>
+

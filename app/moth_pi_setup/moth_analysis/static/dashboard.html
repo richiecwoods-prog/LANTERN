@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>LANTERN Local Dashboard</title>
+  <title>LANTERN Local</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/static/lantern_nav.css" />
   <style>
     :root {
       color-scheme: dark;
@@ -23,17 +24,18 @@
     main {
       max-width: 1180px;
       margin: 0 auto;
-      padding: 48px 24px;
+      padding: 52px 24px;
     }
 
     .hero {
-      margin-bottom: 32px;
+      margin-bottom: 30px;
       text-align: center;
     }
 
     .eyebrow {
+      margin-bottom: 10px;
       color: #8fb7ff;
-      font-weight: 800;
+      font-weight: 900;
       letter-spacing: .1em;
       text-transform: uppercase;
     }
@@ -52,13 +54,19 @@
       font-size: 1.08rem;
     }
 
+    .section-title {
+      margin: 34px 0 14px;
+      color: #dbe8ff;
+      font-size: 1.2rem;
+    }
+
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
       gap: 16px;
     }
 
-    a.card {
+    .card {
       display: flex;
       min-height: 150px;
       flex-direction: column;
@@ -73,7 +81,7 @@
       box-shadow: 0 18px 40px rgba(0,0,0,.22);
     }
 
-    a.card:hover {
+    .card:hover {
       border-color: #8fb7ff;
       background: #15213b;
       transform: translateY(-2px);
@@ -82,23 +90,33 @@
     .primary {
       grid-column: 1 / -1;
       min-height: 180px;
-      border-color: #8fb7ff !important;
+      border-color: #8fb7ff;
       background:
         linear-gradient(135deg, rgba(55, 105, 255, .26), rgba(17, 26, 47, .98)),
-        #111a2f !important;
+        #111a2f;
     }
 
     .card strong {
-      font-size: 1.15rem;
+      font-size: 1.14rem;
     }
 
     .primary strong {
-      font-size: 1.55rem;
+      font-size: 1.5rem;
     }
 
     .card span {
       color: #aab8d0;
       line-height: 1.45;
+    }
+
+    .flow {
+      counter-reset: step;
+    }
+
+    .flow .card strong::before {
+      counter-increment: step;
+      content: counter(step) ". ";
+      color: #8fb7ff;
     }
 
     .status {
@@ -118,50 +136,59 @@
       <div class="eyebrow">LANTERN Local</div>
       <h1>Application Console</h1>
       <p>
-        Central launch point for upload, map review, candidate scoring, JSP 101 reporting,
-        launch RF analysis, data quality checks, and mission briefing outputs.
+        Follow the workflow from data import to map review, data quality, launch RF analysis,
+        JSP 101 reporting, and final briefing output.
       </p>
     </section>
 
-    <section class="grid">
+    <h2 class="section-title">Primary workflow</h2>
+    <section class="grid flow">
       <a class="card primary" href="/static/index.html?v=060">
         <strong>Upload + Map Dashboard</strong>
-        <span>Upload MOTH/LAMP CSV data, view gathered collection locations on the map, inspect hexagons, and manage candidate sites.</span>
-      </a>
-
-      <a class="card primary" href="/static/jsp101_report.html">
-        <strong>JSP 101 Report Generator</strong>
-        <span>Create the main formal report from selected scan evidence, map/candidate findings, RF timing results, limitations, and final decision state.</span>
-      </a>
-
-      <a class="card" href="/static/launch_analysis.html?v=080">
-        <strong>Launch RF Dashboard</strong>
-        <span>L1/L2/L5 timelines, spectrum/spikes, pattern-of-life review, and launch-window ranking.</span>
+        <span>Upload MOTH/LAMP CSV data, view where collection data was gathered, inspect suitability hexagons, and manage candidate sites.</span>
       </a>
 
       <a class="card" href="/static/data_quality.html">
         <strong>Data Quality</strong>
-        <span>Check scan validity, stale GPS, missing fields, zero/zero rows, duplicate data, and filter quality.</span>
+        <span>Check stale GPS, duplicate files, missing values, zero/zero rows, filter scope, and confidence issues before reporting.</span>
+      </a>
+
+      <a class="card" href="/static/launch_analysis.html?v=080">
+        <strong>Launch RF Analysis</strong>
+        <span>Review L1/L2/L5 timelines, spectrum/spikes, pattern-of-life, and recommended or best viable RF timing windows.</span>
+      </a>
+
+      <a class="card" href="/static/jsp101_report.html">
+        <strong>JSP 101 Report</strong>
+        <span>Build the formal report from map findings, scan scope, RF timing, GPS serviceability evidence, caveats, and decision state.</span>
       </a>
 
       <a class="card" href="/static/mission_brief.html">
         <strong>Mission Brief</strong>
-        <span>Operational summary and briefing output for selected findings.</span>
+        <span>Prepare the concise operational briefing after the evidence and report sections have been reviewed.</span>
       </a>
+    </section>
 
+    <h2 class="section-title">Reference and advanced pages</h2>
+    <section class="grid">
       <a class="card" href="/static/briefing.html?v=080">
         <strong>EEI Briefing</strong>
-        <span>Decision-support briefing view linked to the EEI method.</span>
+        <span>Reference page for the EEI decision-support framing and explanation.</span>
+      </a>
+
+      <a class="card" href="/static/moth_v080_decision_workflow.html">
+        <strong>v080 Decision Workflow</strong>
+        <span>Advanced/reference workflow package page.</span>
       </a>
 
       <a class="card" href="/static/uas_rf.html">
         <strong>UAS RF</strong>
-        <span>UAS-specific RF review page.</span>
+        <span>Secondary UAS-specific RF review page.</span>
       </a>
 
       <a class="card" href="/docs">
         <strong>API Docs</strong>
-        <span>Backend FastAPI documentation and route inspection.</span>
+        <span>Backend route inspection and API testing.</span>
       </a>
     </section>
 
@@ -169,5 +196,7 @@
       Local backend: <strong>http://127.0.0.1:8000</strong>
     </div>
   </main>
+
+  <script src="/static/lantern_nav.js"></script>
 </body>
 </html>

@@ -1,0 +1,220 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MOTH v0.8.0 Decision Workflow</title>
+  <link rel="stylesheet" href="moth_v080.css" />
+  <link rel="stylesheet" href="/static/lantern_nav.css" />
+</head>
+<body class="mode-briefing">
+  <div class="moth-app-shell">
+    <aside class="moth-sidebar">
+      <div class="moth-brand">
+        <strong>MOTH Pi Analysis App</strong>
+        <small>v0.8.0 decision workflow MVP</small>
+      </div>
+
+      <div class="mode-toggle" aria-label="Mode selector">
+        <strong>Mode</strong>
+        <label><input type="radio" name="mode" value="briefing" checked /> Briefing</label>
+        <label><input type="radio" name="mode" value="analyst" /> Analyst</label>
+        <label><input type="radio" name="mode" value="admin" /> Admin</label>
+      </div>
+
+      <button class="nav-button active" data-section-target="home">Home</button>
+      <button class="nav-button" data-section-target="antenna">Antenna placement</button>
+      <button class="nav-button" data-section-target="launch">Launch window</button>
+      <button class="nav-button" data-section-target="quality">Data quality</button>
+      <button class="nav-button" data-section-target="reports">Reports</button>
+      <button class="nav-button admin-only" data-section-target="admin">Admin status</button>
+    </aside>
+
+    <main class="moth-main">
+      <div class="topbar">
+        <div>
+          <h1>Decision first. Evidence second. Raw detail third.</h1>
+          <p>The v0.8.0 increment moves MOTH from a technical analysis dashboard into a guided decision workflow for antenna placement, launch timing, data quality checks and reports.</p>
+        </div>
+        <span class="badge">Build target: firmware + field-readiness increment</span>
+      </div>
+
+      <section id="home" class="section active">
+        <div class="grid home-grid">
+          <article class="card home-card" data-section-target="antenna">
+            <h2>Antenna placement</h2>
+            <p>Find and compare candidate antenna sites.</p>
+          </article>
+          <article class="card home-card" data-section-target="launch">
+            <h2>Launch window</h2>
+            <p>Find the best RF-clean observed launch timing.</p>
+          </article>
+          <article class="card home-card" data-section-target="quality">
+            <h2>Data quality</h2>
+            <p>Check whether the scans are good enough to trust.</p>
+          </article>
+          <article class="card home-card" data-section-target="reports">
+            <h2>Reports</h2>
+            <p>Generate one-page candidate and launch-window briefs.</p>
+          </article>
+        </div>
+
+        <div class="card" style="margin-top: 18px;">
+          <h2>Load scan data</h2>
+          <p class="graph-note">Upload one or more MOTH/LAMP CSV files. The local browser parser accepts common column names for timestamp, latitude, longitude, frequency and dBm.</p>
+          <div class="controls">
+            <div class="control-group">
+              <label for="csvFiles">MOTH/LAMP CSV files</label>
+              <input id="csvFiles" type="file" accept=".csv,text/csv" multiple />
+            </div>
+            <button id="loadDemo" class="secondary">Load demo records</button>
+            <button id="clearData" class="danger">Clear data</button>
+          </div>
+          <div id="globalSummary" class="summary-box" style="margin-top: 14px;">
+            <strong>Current view</strong>
+            No scan data loaded yet.
+          </div>
+        </div>
+      </section>
+
+      <section id="antenna" class="section">
+        <h2>Antenna placement</h2>
+        <div id="candidateDecision" class="card decision-card">
+          <div class="decision-eyebrow">Recommended antenna candidate</div>
+          <h3 class="decision-title">No candidate scored yet</h3>
+          <p>Add candidate coordinates, then score candidates.</p>
+        </div>
+
+        <div class="grid two" style="margin-top:18px;">
+          <div class="card">
+            <h3>Candidate workflow</h3>
+            <ol>
+              <li>Click map to add candidate, or enter coordinates below.</li>
+              <li>Name candidate.</li>
+              <li>Score candidate.</li>
+              <li>View candidate graph and evidence.</li>
+              <li>Generate one-page assessment.</li>
+              <li>Compare with top 3.</li>
+            </ol>
+            <div class="controls analyst-only">
+              <div class="control-group"><label>Name</label><input id="candidateName" value="Candidate A" /></div>
+              <div class="control-group"><label>Latitude</label><input id="candidateLat" type="number" step="0.000001" value="2.046200" /></div>
+              <div class="control-group"><label>Longitude</label><input id="candidateLon" type="number" step="0.000001" value="45.318200" /></div>
+              <button id="addCandidate" class="secondary">Add candidate</button>
+              <button id="scoreCandidates" class="primary">Score candidates</button>
+            </div>
+            <div id="candidateProgress" class="progress-box"><div>Scoring candidates...</div><div class="progress-bar"><div class="progress-fill"></div></div><div class="progress-text">Step 1 of 3: filtering data</div></div>
+          </div>
+          <div class="card analyst-only">
+            <h3>Candidate table</h3>
+            <div class="table-wrap"><table id="candidateTable"><thead><tr><th>Name</th><th>Lat</th><th>Lon</th><th>Score</th><th>Confidence</th></tr></thead><tbody></tbody></table></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="launch" class="section">
+        <h2>Launch window</h2>
+        <div id="launchDecision" class="card decision-card">
+          <div class="decision-eyebrow">Best launch timing</div>
+          <h3 class="decision-title">No launch window scored yet</h3>
+          <p>Load scans, select bands, then run launch timing.</p>
+        </div>
+
+        <div class="grid two" style="margin-top:18px;">
+          <div class="card">
+            <h3>Guided launch workflow</h3>
+            <ol>
+              <li>Select scans.</li>
+              <li>Select GNSS bands.</li>
+              <li>Optional: enter UAS link band.</li>
+              <li>Click â€œFind best launch timing.â€</li>
+              <li>Review recommendation, graph and spikes.</li>
+              <li>Generate launch brief.</li>
+            </ol>
+            <div class="controls">
+              <div class="control-group">
+                <label for="bandPreset">Frequency preset</label>
+                <select id="bandPreset">
+                  <option value="L1,L2,L5">GNSS L1+L2+L5</option>
+                  <option value="L1">GNSS L1</option>
+                  <option value="L2">GNSS L2</option>
+                  <option value="L5">GNSS L5</option>
+                  <option value="CUSTOM">Custom</option>
+                </select>
+              </div>
+              <div id="customFreqFields" class="controls hidden analyst-only">
+                <div class="control-group"><label>Min Hz</label><input id="customMinHz" type="number" value="1170000000" /></div>
+                <div class="control-group"><label>Max Hz</label><input id="customMaxHz" type="number" value="1585000000" /></div>
+              </div>
+              <div class="control-group analyst-only"><label>Window minutes</label><input id="windowMinutes" type="number" min="10" value="30" /></div>
+              <div class="control-group analyst-only"><label>Step minutes</label><input id="stepMinutes" type="number" min="5" value="10" /></div>
+              <button id="runLaunch" class="primary">Find best launch timing</button>
+            </div>
+            <div id="filterSummary" class="summary-box" style="margin-top: 14px;"><strong>Current view</strong>Scans: none. Frequency: GNSS L1/L2/L5. Time: full survey. Confidence: unknown.</div>
+            <div id="launchProgress" class="progress-box"><div>Running analysis...</div><div class="progress-bar"><div class="progress-fill"></div></div><div class="progress-text">Step 1 of 4: filtering data</div></div>
+          </div>
+
+          <div class="card graph-panel">
+            <h3>L1 / L2 / L5 RF Activity Over Time</h3>
+            <p class="graph-note">X-axis: time in UTC. Y-axis: MOTH event count per scored bucket. Lower values are cleaner-looking GNSS-band conditions. This does not prove GNSS quality; it shows detected RF activity only.</p>
+            <div id="graphResult" class="summary-box"><strong>Graph result</strong>No graph yet.</div>
+            <canvas id="launchChart" width="900" height="300" aria-label="Launch RF activity chart"></canvas>
+          </div>
+        </div>
+
+        <div class="card analyst-only" style="margin-top:18px;">
+          <h3>Ranked windows</h3>
+          <div class="table-wrap"><table id="windowTable"><thead><tr><th>UTC</th><th>Local</th><th>Category</th><th>Score</th><th>Events</th><th>Spikes</th></tr></thead><tbody></tbody></table></div>
+        </div>
+      </section>
+
+      <section id="quality" class="section">
+        <h2>Data quality</h2>
+        <div id="qualityDecision" class="card decision-card">
+          <div class="decision-eyebrow">Is the data good enough?</div>
+          <h3 class="decision-title">No quality check yet</h3>
+          <p>Load CSV scans and run data quality.</p>
+          <button id="runQuality" class="primary">Run data quality check</button>
+        </div>
+        <div class="card" style="margin-top:18px;">
+          <h3>Quality checks</h3>
+          <div class="table-wrap"><table id="qualityTable"><thead><tr><th>Check</th><th>Value</th><th>Status</th><th>Why it matters</th></tr></thead><tbody></tbody></table></div>
+        </div>
+      </section>
+
+      <section id="reports" class="section">
+        <h2>Reports</h2>
+        <div class="grid two">
+          <div class="card">
+            <h3>Candidate site report</h3>
+            <p class="graph-note">One-page assessment with candidate name, score, confidence, why selected or rejected, timeline result, limitations and next action.</p>
+            <button id="generateCandidateReport" class="primary">Generate candidate report</button>
+            <textarea id="candidateReport" readonly></textarea>
+          </div>
+          <div class="card">
+            <h3>Launch window report</h3>
+            <p class="graph-note">One-page launch brief with recommended timing, local conversion, RF score, L1/L2/L5 status, spike status, pattern-of-life result and checklist.</p>
+            <button id="generateLaunchReport" class="primary">Generate launch report</button>
+            <textarea id="launchReport" readonly></textarea>
+          </div>
+        </div>
+      </section>
+
+      <section id="admin" class="section admin-only">
+        <h2>Admin status</h2>
+        <div class="grid three">
+          <div class="card status-check"><h3>CSV import status</h3><p id="adminImportStatus">No files loaded.</p></div>
+          <div class="card status-check"><h3>Parser version</h3><p>v0.8.0 browser parser / deterministic scoring</p></div>
+          <div class="card status-check"><h3>API health</h3><p id="apiHealth">Static mode. Backend optional.</p></div>
+        </div>
+      </section>
+
+      <p class="footer-note">RF planning aid only. Final launch decision requires authorised operational approval and normal UAS safety checks.</p>
+    </main>
+  </div>
+
+  <script src="moth_v080.js"></script>
+  <script src="/static/lantern_nav.js"></script>
+</body>
+</html>
+
