@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import csv
 import math
@@ -1589,9 +1589,9 @@ from fastapi import Query as _MothQuery, HTTPException as _MothHTTPException
 
 _MOTH_ADVANCED_VERSION = "0.7.5"
 _MOTH_GNSS_BANDS = {
-    "L1": {"center_hz": 1575.42e6, "default_width_mhz": 40.0, "note": "GNSS L1 practical ±20 MHz display window"},
-    "L2": {"center_hz": 1227.60e6, "default_width_mhz": 40.0, "note": "GNSS L2 practical ±20 MHz display window"},
-    "L5": {"center_hz": 1176.45e6, "default_width_mhz": 40.0, "note": "GNSS L5 practical ±20 MHz display window"},
+    "L1": {"center_hz": 1575.42e6, "default_width_mhz": 40.0, "note": "GNSS L1 practical Â±20 MHz display window"},
+    "L2": {"center_hz": 1227.60e6, "default_width_mhz": 40.0, "note": "GNSS L2 practical Â±20 MHz display window"},
+    "L5": {"center_hz": 1176.45e6, "default_width_mhz": 40.0, "note": "GNSS L5 practical Â±20 MHz display window"},
 }
 
 
@@ -2033,7 +2033,7 @@ def moth_advanced_launch_windows(
         recommendation_type, interpretation = _moth_adv_recommendation_label(score, gnss_count, gnss_spikes)
         reasons = [
             f"GNSS-window event count: {gnss_count}",
-            f"Strong GNSS-window spikes ≥ {spike_dbm} dBm: {gnss_spikes}",
+            f"Strong GNSS-window spikes â‰¥ {spike_dbm} dBm: {gnss_spikes}",
         ]
         if strong is not None:
             reasons.append(f"Strongest GNSS-window detection: {round(strong, 1)} dBm")
@@ -2668,7 +2668,7 @@ def _mission_all_rf_fallback_windows(*, collection_id=None, collection_ids=None,
             "reasons": [
                 "GNSS-specific launch windows could not be ranked from the current filters.",
                 f"Fallback all-RF event count: {w['all_rf_event_count']}",
-                f"Fallback all-RF spike count ≥ {spike_dbm} dBm: {w['all_rf_spike_count']}",
+                f"Fallback all-RF spike count â‰¥ {spike_dbm} dBm: {w['all_rf_spike_count']}",
             ],
         })
     windows.sort(key=lambda x: x["score_0_100"], reverse=True)
@@ -3352,3 +3352,4 @@ def mission_jsp101_report_html(
 </body></html>
 """
     return _v092_HTMLResponse(html)
+

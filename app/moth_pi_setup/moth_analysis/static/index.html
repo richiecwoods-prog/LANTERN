@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -99,6 +99,20 @@
   </style>
 </head>
 <body>
+<div id="lantern-fixed-nav" style="
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 99999;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+">
+  <a href="/static/dashboard.html" style="padding:8px 10px;border-radius:9px;background:#0b1020;color:#eef3ff;text-decoration:none;border:1px solid #334155;font-weight:700;">Home</a>
+  <a href="/static/jsp101_report.html" style="padding:8px 10px;border-radius:9px;background:#1f5d8a;color:#fff;text-decoration:none;border:1px solid #8fb7ff;font-weight:700;">JSP 101 Report</a>
+  <a href="/static/launch_analysis.html?v=080" style="padding:8px 10px;border-radius:9px;background:#0b1020;color:#eef3ff;text-decoration:none;border:1px solid #334155;font-weight:700;">Launch RF</a>
+</div>
 <div id="map"></div>
 <div id="quickActions">
   <button type="button" class="primary" onclick="openGraph()">Graph current view</button>
@@ -189,13 +203,13 @@
   <h2>Frequency filters</h2>
   <div class="presetbar">
     <button type="button" onclick="applyFreqPreset(1150000000, 1300000000, 'MOTH survey band 1150-1300 MHz')">1150-1300</button>
-    <button type="button" onclick="applyFreqPreset(1555420000, 1595420000, 'L1 centre 1575.42 MHz, ±20 MHz window')">L1 1555.42-1595.42</button>
-    <button type="button" onclick="applyFreqPreset(1207600000, 1247600000, 'L2 centre 1227.60 MHz, ±20 MHz window')">L2 1207.60-1247.60</button>
-    <button type="button" onclick="applyFreqPreset(1361050000, 1401050000, 'L3 centre 1381.05 MHz, ±20 MHz window')">L3 1361.05-1401.05</button>
-    <button type="button" onclick="applyFreqPreset(1156450000, 1196450000, 'L5 centre 1176.45 MHz, ±20 MHz window')">L5 1156.45-1196.45</button>
+    <button type="button" onclick="applyFreqPreset(1555420000, 1595420000, 'L1 centre 1575.42 MHz, Â±20 MHz window')">L1 1555.42-1595.42</button>
+    <button type="button" onclick="applyFreqPreset(1207600000, 1247600000, 'L2 centre 1227.60 MHz, Â±20 MHz window')">L2 1207.60-1247.60</button>
+    <button type="button" onclick="applyFreqPreset(1361050000, 1401050000, 'L3 centre 1381.05 MHz, Â±20 MHz window')">L3 1361.05-1401.05</button>
+    <button type="button" onclick="applyFreqPreset(1156450000, 1196450000, 'L5 centre 1176.45 MHz, Â±20 MHz window')">L5 1156.45-1196.45</button>
     <button type="button" onclick="applyFreqPreset('', '', 'frequency filter cleared')">Clear</button>
   </div>
-  <div class="inline-note muted">L1/L2/L3/L5 presets use practical ±20 MHz display windows so small MOTH frequency variations still show. The active preset is only a display/scoring filter; it does not modify the stored CSV data.</div>
+  <div class="inline-note muted">L1/L2/L3/L5 presets use practical Â±20 MHz display windows so small MOTH frequency variations still show. The active preset is only a display/scoring filter; it does not modify the stored CSV data.</div>
   <div class="row">
     <div>
       <label>Target min Hz</label>
@@ -317,7 +331,7 @@ const map = new maplibregl.Map({
         type: 'raster',
         tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
         tileSize: 256,
-        attribution: '© OpenStreetMap contributors'
+        attribution: 'Â© OpenStreetMap contributors'
       }
     },
     layers: [{ id: 'osm', type: 'raster', source: 'osm' }]
@@ -536,13 +550,13 @@ async function updateTimeBounds() {
 function updateTimeWindowLabel() {
   const box = document.getElementById('timeWindowLabel');
   if (!timeBounds) { box.textContent = 'Time span not loaded yet.'; return; }
-  const all = `${isoNoMs(timeBounds.start)} → ${isoNoMs(timeBounds.end)}`;
+  const all = `${isoNoMs(timeBounds.start)} â†’ ${isoNoMs(timeBounds.end)}`;
   if (!checked('enableTimeWindow')) {
     box.textContent = `All time: ${all}`;
     return;
   }
   const tw = currentTimeWindow();
-  box.textContent = `Showing: ${tw.start_utc || ''} → ${tw.end_utc || ''}\nFull selected span: ${all}`;
+  box.textContent = `Showing: ${tw.start_utc || ''} â†’ ${tw.end_utc || ''}\nFull selected span: ${all}`;
 }
 
 function debouncedRefresh(reloadTimeBounds=false) {
@@ -564,7 +578,7 @@ async function refreshCollections() {
     const name = c.collection_name || c.file_name || `Collection ${c.collection_id}`;
     return `<div class="collection-item">
       <input class="collection-check" type="checkbox" value="${c.collection_id}" ${isChecked ? 'checked' : ''} onchange="refreshAll({reloadTimeBounds:true})" />
-      <div><b>${esc(name)}</b><div class="mini">${esc(c.file_name || '')}<br>${esc(c.collection_start_utc || '')} → ${esc(c.collection_end_utc || '')}</div></div>
+      <div><b>${esc(name)}</b><div class="mini">${esc(c.file_name || '')}<br>${esc(c.collection_start_utc || '')} â†’ ${esc(c.collection_end_utc || '')}</div></div>
       <span class="pill">${esc(c.valid_events_in_db || c.valid_event_count || 0)}</span>
     </div>`;
   }).join('');
@@ -605,7 +619,7 @@ function disableTimeWindow() {
 async function refreshAll(options={}) {
   const reloadTimeBounds = !!options.reloadTimeBounds || !timeBounds;
   try {
-    setStatus('Refreshing map…');
+    setStatus('Refreshing mapâ€¦');
     if (reloadTimeBounds) await updateTimeBounds();
     updateTimeWindowLabel();
 
@@ -647,11 +661,11 @@ async function refreshAll(options={}) {
 
     const summary = await getJson(`${api}/api/summary?${buildQuery()}`);
     const totals = summary.totals || {};
-    const bandLines = (summary.band_summary || []).map(b => `• ${b.band}: ${b.count} events, avg ${b.avg_dbm ?? ''} dBm`).join('\n') || 'No band summary for this filter.';
+    const bandLines = (summary.band_summary || []).map(b => `â€¢ ${b.band}: ${b.count} events, avg ${b.avg_dbm ?? ''} dBm`).join('\n') || 'No band summary for this filter.';
     document.getElementById('summary').textContent =
       `Selected scans: ${selectedCollectionIds().join(', ') || 'all'}\n` +
       `Events shown: ${totals.valid_events || 0} valid detections\n` +
-      `Time shown: ${totals.first_timestamp_utc || ''} → ${totals.last_timestamp_utc || ''}\n` +
+      `Time shown: ${totals.first_timestamp_utc || ''} â†’ ${totals.last_timestamp_utc || ''}\n` +
       `Area: ${totals.min_lat || ''}, ${totals.min_lon || ''} to ${totals.max_lat || ''}, ${totals.max_lon || ''}\n` +
       `Strength range: ${totals.min_dbm ?? ''} to ${totals.max_dbm ?? ''} dBm\n\n` +
       `Band summary:\n${bandLines}`;
@@ -835,7 +849,7 @@ async function drawGraph() {
   ctx.fillRect(0, 0, w, h);
   ctx.font = '12px system-ui, sans-serif';
   ctx.fillStyle = '#ddd';
-  ctx.fillText('Loading graph…', 12, 20);
+  ctx.fillText('Loading graphâ€¦', 12, 20);
 
   try {
     const extra = {};
@@ -847,7 +861,7 @@ async function drawGraph() {
     const pts = data.points || [];
     const graphTitle = currentGraphCandidateId ? `Candidate graph: ${currentGraphCandidateName || data.candidate_name || currentGraphCandidateId}` : 'Filtered MOTH data graph';
     document.getElementById('graphTitle').textContent = graphTitle;
-    document.getElementById('graphSub').textContent = `Rows: ${data.row_count || 0}; bucket: ${data.bucket_seconds || ''} seconds; ${data.first_timestamp_utc || ''} → ${data.last_timestamp_utc || ''}${currentGraphCandidateId ? '; radius ' + (data.radius_m || valOrEmpty('radiusM')) + ' m' : ''}`;
+    document.getElementById('graphSub').textContent = `Rows: ${data.row_count || 0}; bucket: ${data.bucket_seconds || ''} seconds; ${data.first_timestamp_utc || ''} â†’ ${data.last_timestamp_utc || ''}${currentGraphCandidateId ? '; radius ' + (data.radius_m || valOrEmpty('radiusM')) + ' m' : ''}`;
     ctx.clearRect(0, 0, w, h);
     ctx.fillStyle = '#0f0f0f';
     ctx.fillRect(0, 0, w, h);
@@ -946,7 +960,7 @@ async function assessCandidate(siteId) {
       `<tr><th>Data confidence</th><td>${esc(m.data_confidence ?? c.data_confidence ?? '')}</td></tr>` +
       `</table>`;
     html += `<h3>Why this matters</h3><ul>${(data.plain_reasons || []).map(r => `<li>${esc(r)}</li>`).join('')}</ul>`;
-    html += `<h3>Timeline assessment</h3><p><b>${esc(t.label || '')}</b> — ${esc(t.plain_summary || '')}</p>`;
+    html += `<h3>Timeline assessment</h3><p><b>${esc(t.label || '')}</b> â€” ${esc(t.plain_summary || '')}</p>`;
     html += `<p class="muted">${esc(t.definition || '')}</p>`;
     html += `<table><tr><th>Bucket size</th><td>${esc(t.bucket_minutes ?? '')} min</td></tr><tr><th>Observed buckets</th><td>${esc(t.observed_bucket_count ?? '')} of ${esc(t.possible_bucket_count ?? '')}</td></tr><tr><th>Average dBm variation</th><td>${esc(t.avg_dbm_range ?? '')} dB</td></tr><tr><th>Best window</th><td>${esc(t.best_window?.timestamp_utc ?? '')} / avg ${esc(t.best_window?.avg_dbm ?? '')} dBm</td></tr><tr><th>Weakest window</th><td>${esc(t.weakest_window?.timestamp_utc ?? '')} / avg ${esc(t.weakest_window?.avg_dbm ?? '')} dBm</td></tr></table>`;
     html += `<h3>Top matching frequencies</h3><table><tr><th>MHz</th><th>Events</th><th>Avg dBm</th></tr>${topFreqRows}</table>`;
@@ -985,7 +999,21 @@ function downloadCandidatePdf() {
 function printAssessment() {
   const html = document.getElementById('assessmentContent').innerHTML;
   const win = window.open('', '_blank');
-  win.document.write(`<html><head><title>MOTH Candidate Assessment</title><style>body{font-family:Arial,sans-serif;margin:24px}table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ccc;padding:6px;text-align:left}.big-good{color:#0b7a0b;font-weight:bold}.big-check{color:#a86a00;font-weight:bold}.big-poor{color:#b00000;font-weight:bold}</style></head><body>${html}</body></html>`);
+  win.document.write(`<html><head><title>MOTH Candidate Assessment</title><style>body{font-family:Arial,sans-serif;margin:24px}table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ccc;padding:6px;text-align:left}.big-good{color:#0b7a0b;font-weight:bold}.big-check{color:#a86a00;font-weight:bold}.big-poor{color:#b00000;font-weight:bold}</style></head><body>
+<div id="lantern-fixed-nav" style="
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 99999;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+">
+  <a href="/static/dashboard.html" style="padding:8px 10px;border-radius:9px;background:#0b1020;color:#eef3ff;text-decoration:none;border:1px solid #334155;font-weight:700;">Home</a>
+  <a href="/static/jsp101_report.html" style="padding:8px 10px;border-radius:9px;background:#1f5d8a;color:#fff;text-decoration:none;border:1px solid #8fb7ff;font-weight:700;">JSP 101 Report</a>
+  <a href="/static/launch_analysis.html?v=080" style="padding:8px 10px;border-radius:9px;background:#0b1020;color:#eef3ff;text-decoration:none;border:1px solid #334155;font-weight:700;">Launch RF</a>
+</div>${html}</body></html>`);
   win.document.close();
   win.focus();
   win.print();
@@ -993,7 +1021,7 @@ function printAssessment() {
 
 document.getElementById('uploadForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  setStatus('Importing CSV file(s)…');
+  setStatus('Importing CSV file(s)â€¦');
   const fd = new FormData(e.target);
   if (fd.get('white_list_enabled') === null) fd.set('white_list_enabled', 'false');
   try {
@@ -1054,3 +1082,4 @@ map.on('load', async () => {
 </script>
 </body>
 </html>
+
