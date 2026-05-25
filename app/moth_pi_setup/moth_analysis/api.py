@@ -2,6 +2,7 @@
 
 import csv
 import math
+import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,11 @@ from .geo import clamp, haversine_m
 from .h3tools import cell_to_boundary_lnglat, latlon_to_cell
 from .ingest import insert_candidate_site, insert_collection_from_csv
 from .scoring import percentile, score_candidate_sites
+from .quality import (
+    get_latest_quality_summary,
+    load_and_clean_csv,
+    save_quality_summary,
+)
 
 app = FastAPI(title="MOTH Data Analysis", version="0.6.0", default_response_class=ORJSONResponse)
 
@@ -38,6 +44,10 @@ class CandidateIn(BaseModel):
 def startup() -> None:
     init_db()
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+@app.get("/api/quality/summary")
+def api_quality_summary():
+    return get_latest_quality_summary(DB_PATH)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -176,8 +186,28 @@ def do_import(
     operator_notes: str | None = None,
 ) -> dict[str, Any]:
     dest = save_upload_file(file)
+
+    # LANTERN import quality gate - shadow mode.
+    # This records quality/filter statistics but still imports the original CSV.
+    quality_summary: dict[str, Any] | None = None
+
     try:
-        return insert_collection_from_csv(
+        _raw_df, _cleaned_df, quality_summary = load_and_clean_csv(
+            dest,
+            source_file=Path(file.filename or dest.name).name,
+            mode="shadow",
+        )
+        save_quality_summary(DB_PATH, quality_summary)
+    except Exception as exc:
+        print(f"[LANTERN quality gate] warning: {exc}")
+        quality_summary = {
+            "ok": False,
+            "source_file": Path(file.filename or dest.name).name,
+            "error": str(exc),
+        }
+
+    try:
+        result = insert_collection_from_csv(
             dest,
             collection_name=collection_name,
             device_serial=device_serial,
@@ -191,6 +221,13 @@ def do_import(
             antenna_notes=antenna_notes,
             operator_notes=operator_notes,
         )
+
+        if isinstance(result, dict):
+            result["quality_mode"] = "shadow"
+            result["quality_summary"] = quality_summary
+
+        return result
+
     except Exception as exc:
         if "UNIQUE constraint failed" in str(exc):
             raise HTTPException(status_code=409, detail="This file hash already exists in the database") from exc
