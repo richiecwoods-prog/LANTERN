@@ -1,0 +1,295 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EEI LANTERN | J2 Live Report</title>
+  <style>
+    :root {
+      --bg: #0d1520;
+      --panel: #111f2d;
+      --panel2: #16283a;
+      --line: #29445f;
+      --text: #eef4f8;
+      --muted: #a9bac8;
+      --blue: #58a6ff;
+      --green: #3fb950;
+      --amber: #d29922;
+      --red: #f85149;
+      --white: #fff;
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: Arial, Helvetica, sans-serif; background: var(--bg); color: var(--text); }
+    header { padding: 18px 22px; border-bottom: 1px solid var(--line); background: #0a111a; position: sticky; top: 0; z-index: 10; }
+    h1 { margin: 0; font-size: 22px; letter-spacing: .03em; }
+    .subtitle { margin-top: 4px; color: var(--muted); font-size: 12px; }
+    main { padding: 18px 22px 40px; max-width: 1500px; margin: 0 auto; }
+    .topbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+    button, a.button { background: #18324b; border: 1px solid #315b81; color: var(--text); padding: 8px 10px; border-radius: 6px; cursor: pointer; text-decoration: none; font-weight: 700; }
+    button:hover, a.button:hover { background: #204463; }
+    input { background: #07111c; color: var(--text); border: 1px solid var(--line); padding: 8px; border-radius: 6px; }
+    label { color: var(--muted); font-size: 12px; }
+    .status-grid { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 10px; margin: 14px 0; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 13px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+    .card h2 { margin: 0 0 10px; font-size: 16px; color: var(--white); }
+    .card h3 { margin: 12px 0 8px; font-size: 13px; color: var(--blue); }
+    .status-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+    .status-value { font-size: 24px; font-weight: 900; margin-top: 5px; }
+    .GREEN, .NORMAL, .LOW { color: var(--green); }
+    .AMBER, .CAUTION, .MODERATE, .HIGH, .HIGHCAUTION { color: var(--amber); }
+    .RED, .SEVERE, .RESTRICTED { color: var(--red); }
+    .NODATA { color: #c9d1d9; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 10px; }
+    .tab { background: #10263a; }
+    .tab.active { background: #275a84; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    .grid-2 { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { border-bottom: 1px solid var(--line); padding: 8px 6px; text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    a { color: #79c0ff; }
+    ul { margin: 8px 0 0 18px; padding: 0; }
+    li { margin: 6px 0; }
+    .muted { color: var(--muted); }
+    .small { font-size: 11px; color: var(--muted); }
+    .warn { border-left: 5px solid var(--red); }
+    .good { border-left: 5px solid var(--green); }
+    .amber { border-left: 5px solid var(--amber); }
+    .mono { font-family: Consolas, Menlo, monospace; font-size: 12px; white-space: pre-wrap; }
+    .pill { display:inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; margin: 2px; background: #0b1724; }
+    .footer { margin-top: 18px; color: var(--muted); font-size: 11px; }
+    @media (max-width: 1000px) {
+      .status-grid, .grid-2 { grid-template-columns: 1fr; }
+      header { position: static; }
+    }
+    @media print {
+      body { background: white; color: black; }
+      header, .card { background: white; color: black; box-shadow: none; }
+      .topbar, .tabs { display: none; }
+      .tab-panel { display: block; page-break-inside: avoid; }
+      a { color: black; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <h1>EEI LANTERN J2 Live Report</h1>
+  <div class="subtitle">GNSS / RF | Aviation | Public-source threat actor awareness | Source-traceable decision support</div>
+  <div class="topbar">
+    <button id="refreshBtn">Refresh live OSINT</button>
+    <button id="cachedBtn">Load cached</button>
+    <button onclick="window.print()">Print / save PDF</button>
+    <a class="button" href="/">LANTERN Home</a>
+    <label>AOI <input id="aoiName" value="Aden Adde / Mogadishu" size="28"></label>
+    <label>Collections <input id="collectionIds" placeholder="e.g. 1,2,3" size="12"></label>
+    <label><input type="checkbox" id="autoRefresh"> Auto refresh 5 min</label>
+  </div>
+</header>
+<main>
+  <div class="status-grid">
+    <div class="card"><div class="status-label">Overall J2</div><div id="overall" class="status-value NODATA">NO DATA</div></div>
+    <div class="card"><div class="status-label">GNSS/RF</div><div id="gnss" class="status-value NODATA">NO DATA</div></div>
+    <div class="card"><div class="status-label">Security</div><div id="security" class="status-value NODATA">NO DATA</div></div>
+    <div class="card"><div class="status-label">Aviation</div><div id="aviation" class="status-value NODATA">NO DATA</div></div>
+    <div class="card"><div class="status-label">Confidence</div><div id="confidence" class="status-value NODATA">LOW</div></div>
+  </div>
+
+  <div class="card amber">
+    <h2>Executive J2 Summary</h2>
+    <div class="small" id="generated">Not loaded</div>
+    <ul id="kjs"></ul>
+    <p><b>Recommended action:</b> <span id="action">Load report.</span></p>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="summary">J2 Summary</button>
+    <button class="tab" data-tab="gnssTab">GNSS/RF</button>
+    <button class="tab" data-tab="actorsTab">Threat Actors</button>
+    <button class="tab" data-tab="aviationTab">Aviation</button>
+    <button class="tab" data-tab="newsTab">News Feed</button>
+    <button class="tab" data-tab="sourcesTab">Source Log</button>
+    <button class="tab" data-tab="exportTab">Export</button>
+  </div>
+
+  <section id="summary" class="tab-panel active">
+    <div class="grid-2">
+      <div class="card">
+        <h2>Current judgement</h2>
+        <div id="summaryText" class="mono">No report loaded.</div>
+      </div>
+      <div class="card warn">
+        <h2>Safety boundary</h2>
+        <p id="caveat">This is decision-support only. It does not authorise flight, certify GNSS performance, or provide tactical targeting intelligence.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="gnssTab" class="tab-panel">
+    <div class="grid-2">
+      <div class="card">
+        <h2>Local L1/L2/L5 RF assessment</h2>
+        <p id="gnssSummary" class="muted"></p>
+        <table><thead><tr><th>Band</th><th>Events</th><th>Max dBm</th></tr></thead><tbody id="gnssRows"></tbody></table>
+      </div>
+      <div class="card">
+        <h2>Recent GNSS timeline buckets</h2>
+        <table><thead><tr><th>UTC bucket</th><th>L1</th><th>L2</th><th>L5</th><th>Total</th></tr></thead><tbody id="timelineRows"></tbody></table>
+      </div>
+    </div>
+  </section>
+
+  <section id="actorsTab" class="tab-panel">
+    <div class="card warn">
+      <h2>Public-source threat actor watch</h2>
+      <p class="muted" id="actorBoundary">Area-level public-source awareness only. No live locations, routes, targetable coordinates or tactical cues displayed.</p>
+      <table><thead><tr><th>Actor</th><th>Source mentions</th><th>Latest public report</th><th>Confidence</th><th>Operational relevance</th><th>Caveat</th></tr></thead><tbody id="actorRows"></tbody></table>
+    </div>
+  </section>
+
+  <section id="aviationTab" class="tab-panel">
+    <div class="card">
+      <h2>Aviation / airport operating environment</h2>
+      <p id="aviationSummary" class="muted"></p>
+      <div id="aviationChecks"></div>
+    </div>
+  </section>
+
+  <section id="newsTab" class="tab-panel">
+    <div class="card">
+      <h2>Latest OSINT leads</h2>
+      <p class="small">These are source leads, not verified intelligence judgements. Use source age, confidence and source reliability before briefing.</p>
+      <table><thead><tr><th>Source</th><th>Category</th><th>Title</th><th>Published / retrieved</th><th>Score</th></tr></thead><tbody id="newsRows"></tbody></table>
+    </div>
+  </section>
+
+  <section id="sourcesTab" class="tab-panel">
+    <div class="card">
+      <h2>Source log</h2>
+      <table><thead><tr><th>Source</th><th>Category</th><th>Reliability</th><th>Refresh</th><th>URL</th></tr></thead><tbody id="sourceRows"></tbody></table>
+    </div>
+  </section>
+
+  <section id="exportTab" class="tab-panel">
+    <div class="card">
+      <h2>Export</h2>
+      <p><a id="htmlExport" class="button" href="/api/j2/report.html" target="_blank">Open printable HTML report</a></p>
+      <p><button id="copyJson">Copy JSON snapshot</button></p>
+      <textarea id="jsonBox" style="width:100%;height:420px;background:#07111c;color:#eef4f8;border:1px solid var(--line);border-radius:8px;padding:10px;"></textarea>
+    </div>
+  </section>
+
+  <div class="footer">LANTERN J2 Live Report v1.0. Area-level OSINT only. GPS serviceability must be proven locally with equipment receiver validation.</div>
+</main>
+
+<script>
+let lastData = null;
+let timer = null;
+
+function clsForStatus(s) {
+  return String(s || 'NO DATA').replace(/\s+/g, '').toUpperCase();
+}
+function setStatus(id, value) {
+  const el = document.getElementById(id);
+  el.textContent = value || 'NO DATA';
+  el.className = 'status-value ' + clsForStatus(value);
+}
+function esc(s) {
+  return String(s ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+}
+function row(cells) { return '<tr>' + cells.map(c => '<td>' + c + '</td>').join('') + '</tr>'; }
+
+async function loadReport(refresh=false) {
+  const aoi = document.getElementById('aoiName').value || 'Aden Adde / Mogadishu';
+  const collections = document.getElementById('collectionIds').value.trim();
+  const params = new URLSearchParams({refresh: refresh ? 'true' : 'false', aoi_name: aoi, news_limit: '60'});
+  if (collections) params.set('collection_ids', collections);
+  const url = '/api/j2/report?' + params.toString();
+  document.getElementById('generated').textContent = 'Loading ' + (refresh ? 'live OSINT' : 'cached report') + '...';
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  lastData = await res.json();
+  render(lastData);
+}
+
+function render(data) {
+  setStatus('overall', data.overall_status);
+  setStatus('gnss', data.gnss_status);
+  setStatus('security', data.security_status);
+  setStatus('aviation', data.aviation_status);
+  setStatus('confidence', data.confidence);
+  document.getElementById('generated').textContent = `Generated UTC: ${data.generated_utc} | AOI: ${data.aoi?.name || ''}`;
+  document.getElementById('action').textContent = data.recommended_action || '';
+  document.getElementById('caveat').textContent = data.caveat || '';
+
+  document.getElementById('kjs').innerHTML = (data.key_judgements || []).map(k => `<li><b>${esc(k.id)}</b>: ${esc(k.text)} <span class="small">Confidence: ${esc(k.confidence)}</span></li>`).join('');
+  document.getElementById('summaryText').textContent = JSON.stringify({
+    overall_status: data.overall_status,
+    gnss_status: data.gnss_status,
+    security_status: data.security_status,
+    aviation_status: data.aviation_status,
+    confidence: data.confidence,
+    refresh_result: data.refresh_result
+  }, null, 2);
+
+  const gnss = data.gnss_rf || {};
+  document.getElementById('gnssSummary').textContent = gnss.summary || '';
+  const totals = gnss.event_totals || {};
+  const max = gnss.max_dbm || {};
+  document.getElementById('gnssRows').innerHTML = ['L1','L2','L5'].map(b => row([esc(b), esc(totals[b] ?? 0), esc(max[b] ?? 'n/a')])).join('');
+  document.getElementById('timelineRows').innerHTML = (gnss.points || []).slice(-30).reverse().map(p => row([
+    esc(p.bucket_start_utc), esc(p.L1_event_count ?? 0), esc(p.L2_event_count ?? 0), esc(p.L5_event_count ?? 0), esc(p.total_gnss_events ?? 0)
+  ])).join('') || row(['No timeline data','','','','']);
+
+  const sec = data.security || {};
+  document.getElementById('actorBoundary').textContent = sec.safety_boundary || '';
+  document.getElementById('actorRows').innerHTML = (sec.watchlist || []).map(a => row([
+    esc(a.actor_name), esc(a.source_mention_count), esc(a.latest_public_report_utc || 'n/a'), esc(a.confidence), esc(a.operational_relevance), esc(a.caveat)
+  ])).join('') || row(['No actor watch data','','','','','']);
+
+  const av = data.aviation || {};
+  document.getElementById('aviationSummary').textContent = av.summary || '';
+  document.getElementById('aviationChecks').innerHTML = '<h3>Required checks</h3><ul>' + (av.checks || []).map(x => `<li>${esc(x)}</li>`).join('') + '</ul>';
+
+  document.getElementById('newsRows').innerHTML = (data.news || []).map(i => row([
+    esc(i.source_name), esc(i.category), i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noreferrer">${esc(i.title)}</a>` : esc(i.title), esc(i.published_utc || i.retrieved_utc || ''), esc(i.relevance_score)
+  ])).join('') || row(['No cached news. Use Refresh live OSINT.','','','','']);
+
+  document.getElementById('sourceRows').innerHTML = (data.source_log || []).map(s => row([
+    esc(s.source_name), esc(s.category), esc(s.reliability), esc(s.refresh_hint), s.url ? `<a href="${esc(s.url)}" target="_blank" rel="noreferrer">open</a>` : ''
+  ])).join('');
+
+  const exportParams = new URLSearchParams({aoi_name: data.aoi?.name || 'Aden Adde / Mogadishu'});
+  const collections = document.getElementById('collectionIds').value.trim();
+  if (collections) exportParams.set('collection_ids', collections);
+  document.getElementById('htmlExport').href = '/api/j2/report.html?' + exportParams.toString();
+  document.getElementById('jsonBox').value = JSON.stringify(data, null, 2);
+}
+
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.tab).classList.add('active');
+  });
+});
+
+document.getElementById('refreshBtn').addEventListener('click', () => loadReport(true).catch(e => alert(e.message)));
+document.getElementById('cachedBtn').addEventListener('click', () => loadReport(false).catch(e => alert(e.message)));
+document.getElementById('copyJson').addEventListener('click', async () => {
+  await navigator.clipboard.writeText(document.getElementById('jsonBox').value);
+});
+document.getElementById('autoRefresh').addEventListener('change', e => {
+  if (timer) clearInterval(timer);
+  timer = null;
+  if (e.target.checked) timer = setInterval(() => loadReport(true).catch(console.error), 5 * 60 * 1000);
+});
+
+loadReport(false).catch(e => {
+  document.getElementById('generated').textContent = 'Failed to load: ' + e.message;
+});
+</script>
+</body>
+</html>
+
