@@ -4398,203 +4398,6 @@ def lantern_reporting_interpretation(
 
 # ---- end EEI LANTERN v0.10.3 signal interpretation reporting ----
 
-# ---- EEI LANTERN v0.11.0 Platform Navigation / Deployment layer ----
-# Additive only. Provides platform home, route registry and deployment checks.
-
-from datetime import datetime as _PlatformDateTime, timezone as _PlatformTimezone
-from pathlib import Path as _PlatformPath
-from typing import Any as _PlatformAny
-import importlib.util as _platform_importlib_util
-import sys as _platform_sys
-
-from fastapi.responses import HTMLResponse as _PlatformHTMLResponse
-
-_LANTERN_PLATFORM_VERSION = "0.11.0"
-
-
-def _platform_now() -> str:
-    return _PlatformDateTime.now(_PlatformTimezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-
-def _platform_static_dir() -> _PlatformPath:
-    try:
-        return STATIC_DIR  # type: ignore[name-defined]
-    except Exception:
-        return _PlatformPath(__file__).with_name("static")
-
-
-def _platform_page_exists(url: str) -> bool:
-    if url in ("/", ""):
-        return True
-    if url.startswith("/api/"):
-        return True
-    if url.startswith("/lantern") or url.startswith("/app"):
-        return True
-    path = url.split("?", 1)[0]
-    if path.startswith("/static/"):
-        return (_platform_static_dir() / path.replace("/static/", "", 1)).exists()
-    return False
-
-
-def _platform_nav_groups() -> list[dict[str, _PlatformAny]]:
-    groups = [
-        {
-            "group": "Briefing",
-            "items": [
-                {"title": "Platform Home", "url": "/app?v=011", "description": "Role-based start page and deployment status."},
-                {"title": "Flight Safety Brief", "url": "/lantern?v=011", "description": "Pilot and flight-safety GNSS clearance view."},
-                {"title": "Mission Brief", "url": "/static/mission_brief.html?v=091", "description": "RF readiness and mission summary."},
-                {"title": "Print / JSP 101 Report", "url": "/api/mission/report-jsp101.html", "description": "Printable structured RF mission report."},
-            ],
-        },
-        {
-            "group": "Operations",
-            "items": [
-                {"title": "Map / Candidates", "url": "/?v=011", "description": "Upload scans, map hexagons, candidate siting and scoring."},
-                {"title": "Data Quality", "url": "/static/data_quality.html?v=080", "description": "Import quality, scan coverage and confidence checks."},
-                {"title": "Simple Briefing Cards", "url": "/static/briefing.html?v=080", "description": "Plain-English decision cards."},
-            ],
-        },
-        {
-            "group": "Analyst",
-            "items": [
-                {"title": "Launch RF Analyst", "url": "/static/launch_analysis.html?v=075", "description": "L1/L2/L5 timelines, spectrum, spikes and pattern-of-life."},
-                {"title": "Raw Map Dashboard", "url": "/static/index.html?v=011", "description": "Direct static dashboard view if needed."},
-            ],
-        },
-        {
-            "group": "System",
-            "items": [
-                {"title": "Platform Health", "url": "/api/platform/health", "description": "Backend, database and static page health."},
-                {"title": "Deploy Check", "url": "/api/platform/deploy-check", "description": "Runtime dependencies and deployment readiness."},
-                {"title": "API Health", "url": "/api/health", "description": "Core API health endpoint."},
-                {"title": "LANTERN API Health", "url": "/api/lantern/health", "description": "Flight-safety API health endpoint."},
-            ],
-        },
-    ]
-    for group in groups:
-        for item in group["items"]:
-            item["available"] = _platform_page_exists(item["url"])
-    return groups
-
-
-def _platform_db_summary() -> dict[str, _PlatformAny]:
-    db_path = None
-    try:
-        db_path = DB_PATH  # type: ignore[name-defined]
-    except Exception:
-        pass
-    out: dict[str, _PlatformAny] = {
-        "path": str(db_path) if db_path is not None else None,
-        "exists": bool(db_path and _PlatformPath(db_path).exists()),
-        "collection_count": None,
-        "total_event_count": None,
-        "valid_event_count": None,
-    }
-    try:
-        conn = connect()  # type: ignore[name-defined]
-        try:
-            out["collection_count"] = int(conn.execute("SELECT COUNT(*) FROM moth_collections").fetchone()[0] or 0)
-            row = conn.execute("SELECT COUNT(*) AS total, SUM(CASE WHEN valid = 1 THEN 1 ELSE 0 END) AS valid FROM moth_events").fetchone()
-            out["total_event_count"] = int(row[0] or 0)
-            out["valid_event_count"] = int(row[1] or 0)
-        finally:
-            conn.close()
-    except Exception as exc:
-        out["error"] = str(exc)
-    return out
-
-
-def _platform_module_ok(name: str) -> bool:
-    return _platform_importlib_util.find_spec(name) is not None
-
-
-@app.get("/app", response_class=_PlatformHTMLResponse)  # type: ignore[name-defined]
-def lantern_platform_home() -> str:
-    path = _platform_static_dir() / "platform_home.html"
-    if path.exists():
-        return path.read_text(encoding="utf-8")
-    return "<html><body><h1>EEI LANTERN</h1><p>platform_home.html is missing from the static folder.</p></body></html>"
-
-
-@app.get("/api/platform/navigation")  # type: ignore[name-defined]
-def lantern_platform_navigation() -> dict[str, _PlatformAny]:
-    return {
-        "status": "ok",
-        "platform_version": _LANTERN_PLATFORM_VERSION,
-        "generated_utc": _platform_now(),
-        "groups": _platform_nav_groups(),
-        "notes": [
-            "Navigation is role-based: Briefing, Operations, Analyst, System.",
-            "Unavailable static pages remain listed so missing deployments are visible rather than hidden.",
-        ],
-    }
-
-
-@app.get("/api/platform/health")  # type: ignore[name-defined]
-def lantern_platform_health() -> dict[str, _PlatformAny]:
-    static = _platform_static_dir()
-    files = {
-        "platform_home": (static / "platform_home.html").exists(),
-        "platform_shell_css": (static / "platform_shell.css").exists(),
-        "platform_shell_js": (static / "platform_shell.js").exists(),
-        "lantern_flight_safety": (static / "lantern_flight_safety.html").exists(),
-        "launch_analysis": (static / "launch_analysis.html").exists(),
-        "main_index": (static / "index.html").exists(),
-        "data_quality": (static / "data_quality.html").exists(),
-        "mission_brief": (static / "mission_brief.html").exists(),
-    }
-    return {
-        "status": "ok",
-        "platform_version": _LANTERN_PLATFORM_VERSION,
-        "generated_utc": _platform_now(),
-        "static_dir": str(static),
-        "static_files": files,
-        "database": _platform_db_summary(),
-        "navigation_url": "/api/platform/navigation",
-        "home_url": "/app?v=011",
-    }
-
-
-@app.get("/api/platform/deploy-check")  # type: ignore[name-defined]
-def lantern_platform_deploy_check() -> dict[str, _PlatformAny]:
-    static = _platform_static_dir()
-    db = _platform_db_summary()
-    required_static = [
-        ("platform_home.html", static / "platform_home.html"),
-        ("platform_shell.css", static / "platform_shell.css"),
-        ("platform_shell.js", static / "platform_shell.js"),
-        ("lantern_flight_safety.html", static / "lantern_flight_safety.html"),
-    ]
-    modules = ["fastapi", "uvicorn", "pandas", "h3", "orjson", "pydantic"]
-    checks: list[dict[str, _PlatformAny]] = []
-    checks.append({"name": "Python", "status": "pass", "detail": _platform_sys.version.split()[0]})
-    checks.append({"name": "Database path", "status": "pass" if db.get("exists") else "warn", "detail": db.get("path") or "DB_PATH unavailable"})
-    for name, path in required_static:
-        checks.append({"name": f"Static file: {name}", "status": "pass" if path.exists() else "fail", "detail": str(path)})
-    for mod in modules:
-        checks.append({"name": f"Python module: {mod}", "status": "pass" if _platform_module_ok(mod) else "fail", "detail": "available" if _platform_module_ok(mod) else "missing"})
-    optional = ["webview", "PyInstaller"]
-    for mod in optional:
-        checks.append({"name": f"Optional packaging module: {mod}", "status": "pass" if _platform_module_ok(mod) else "warn", "detail": "available" if _platform_module_ok(mod) else "optional; install for desktop packaging"})
-    fail_count = sum(1 for c in checks if c["status"] == "fail")
-    warn_count = sum(1 for c in checks if c["status"] == "warn")
-    return {
-        "status": "ready" if fail_count == 0 else "not_ready",
-        "platform_version": _LANTERN_PLATFORM_VERSION,
-        "generated_utc": _platform_now(),
-        "fail_count": fail_count,
-        "warn_count": warn_count,
-        "checks": checks,
-        "deployment_guidance": [
-            "Use Start_LANTERN_Local.ps1 for local browser mode.",
-            "Use LANTERN_App.ps1 for the desktop wrapper when pywebview is installed.",
-            "Use Build_LANTERN_Desktop.ps1 after deploy-check returns no failures.",
-        ],
-    }
-
-# ---- end EEI LANTERN v0.11.0 Platform Navigation / Deployment layer ----
-
 # ---- EEI LANTERN v0.11.3 J2 Live Article Rotator API ----
 # Restores the real J2 Live Report article list, links and live-update feed.
 # This block is intentionally additive, but the installer removes earlier broken /api/j2 blocks first.
@@ -5713,3 +5516,573 @@ def api_j2_threat_news_hotfix(
     }
 
 # ---- end EEI LANTERN v0.11.4a J2 Threat Actors endpoint hotfix ----
+
+# ---- EEI LANTERN v0.11.6 J2 platform status compatibility layer ----
+# Purpose: keep the platform status panel working after rollback of the mistaken v0.11.1 /rotator page.
+# This does NOT restore the old /rotator route. The active J2 live article rotator remains /static/j2_report.html.
+
+from typing import Any as _J2StatusAny
+
+try:
+    _LANTERN_PLATFORM_VERSION = "0.11.6"  # type: ignore[assignment]
+except Exception:
+    pass
+
+
+def _j2_status_static_dir():
+    try:
+        return STATIC_DIR  # type: ignore[name-defined]
+    except Exception:
+        from pathlib import Path as _Path
+        return _Path(__file__).with_name("static")
+
+
+def _j2_status_route_exists(path: str) -> bool:
+    try:
+        for route in app.routes:  # type: ignore[name-defined]
+            if getattr(route, "path", None) == path:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _j2_status_payload() -> dict[str, _J2StatusAny]:
+    static = _j2_status_static_dir()
+    j2_page = static / "j2_report.html"
+    shell_js = static / "platform_shell.js"
+    shell_css = static / "platform_shell.css"
+    platform_home = static / "platform_home.html"
+
+    route_checks = {
+        "j2_news": _j2_status_route_exists("/api/j2/news"),
+        "j2_report": _j2_status_route_exists("/api/j2/report"),
+        "j2_health": _j2_status_route_exists("/api/j2/health"),
+        "j2_threat_actors": _j2_status_route_exists("/api/j2/threat-actors") or _j2_status_route_exists("/api/j2/threat_actors"),
+        "legacy_rotator_route_removed": not _j2_status_route_exists("/rotator"),
+    }
+    files = {
+        "j2_report_html": j2_page.exists(),
+        "platform_shell_js": shell_js.exists(),
+        "platform_shell_css": shell_css.exists(),
+        "platform_home_html": platform_home.exists(),
+        "rotator_html_required": False,
+        "rotator_html_present": (static / "rotator.html").exists(),
+    }
+
+    # This endpoint deliberately treats the old /rotator as not required.
+    required_ok = bool(files["j2_report_html"]) and bool(route_checks["j2_news"]) and bool(route_checks["j2_report"])
+    if not route_checks["j2_health"]:
+        # Older J2 live article builds may not have /api/j2/health; do not fail the page for that alone.
+        required_ok = required_ok and True
+
+    return {
+        "ok": required_ok,
+        "status": "ok" if required_ok else "check",
+        "platform_version": globals().get("_LANTERN_PLATFORM_VERSION", "0.11.6"),
+        "compatibility_endpoint": True,
+        "static_dir": str(static),
+        "files": files,
+        "routes": route_checks,
+        "urls": {
+            "platform_home": "/app?v=0116",
+            "j2_live_report": "/static/j2_report.html?v=115",
+            "j2_static": "/static/j2_report.html?v=115",
+            "j2_news_api": "/api/j2/news?live=true&force=true",
+            "j2_threat_actor_api": "/api/j2/threat-actors?live=true&force=true",
+            "legacy_rotator": "not used",
+        },
+        "note": "Compatibility response for stale platform pages that still call /api/platform/j2-rotator-check. The old /rotator page remains removed; the correct live article rotator is inside /static/j2_report.html.",
+    }
+
+
+@app.get("/api/platform/j2-live-check")  # type: ignore[name-defined]
+def lantern_j2_live_check() -> dict[str, _J2StatusAny]:
+    return _j2_status_payload()
+
+
+@app.get("/api/platform/j2-rotator-check")  # type: ignore[name-defined]
+def lantern_j2_rotator_check_compat() -> dict[str, _J2StatusAny]:
+    return _j2_status_payload()
+
+# ---- end EEI LANTERN v0.11.6 J2 platform status compatibility layer ----
+
+# ---- EEI LANTERN v0.12.0 Navigation Rationalisation layer ----
+# Primary navigation = end-state reporting and decision support.
+# Secondary stack = engineering / analyst evidence generation.
+# Additive UI routing only. Does not change RF scoring, import quality, J2 feed logic, or GNSS calculations.
+
+from datetime import datetime as _V012DateTime, timezone as _V012Timezone
+from pathlib import Path as _V012Path
+from typing import Any as _V012Any
+import importlib.util as _v012_importlib_util
+import json as _v012_json
+import sys as _v012_sys
+
+from fastapi.responses import HTMLResponse as _V012HTMLResponse
+
+_LANTERN_PLATFORM_VERSION = "0.12.0"
+_V012_START_MARKER = "EEI LANTERN v0.12.0 Navigation Rationalisation layer"
+
+
+def _v012_now() -> str:
+    return _V012DateTime.now(_V012Timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _v012_static_dir() -> _V012Path:
+    try:
+        return STATIC_DIR  # type: ignore[name-defined]
+    except Exception:
+        return _V012Path(__file__).with_name("static")
+
+
+def _v012_static_page(name: str, fallback_title: str = "EEI LANTERN") -> str:
+    p = _v012_static_dir() / name
+    if p.exists():
+        return p.read_text(encoding="utf-8", errors="replace")
+    return f"""<!doctype html><html><head><meta charset='utf-8'><title>{fallback_title}</title></head><body><h1>{fallback_title}</h1><p>Missing static page: {name}</p><p><a href='/app?v=012'>Return to LANTERN Home</a></p></body></html>"""
+
+
+def _v012_route_exists(path: str) -> bool:
+    try:
+        return any(getattr(route, "path", None) == path for route in app.routes)  # type: ignore[name-defined]
+    except Exception:
+        return False
+
+
+def _v012_page_exists(url: str) -> bool:
+    if not url:
+        return False
+    if url.startswith("/api/"):
+        return True
+    path = url.split("?", 1)[0]
+    if path in {"/", "/app", "/context", "/reporting", "/engineering", "/system"}:
+        return True
+    if path.startswith("/reporting/") or path.startswith("/engineering/") or path.startswith("/system/"):
+        return True
+    if path.startswith("/static/"):
+        return (_v012_static_dir() / path.replace("/static/", "", 1)).exists()
+    if path == "/lantern":
+        return True
+    return _v012_route_exists(path)
+
+
+def _v012_nav_registry() -> dict[str, _V012Any]:
+    primary = [
+        {"key": "home", "title": "Home", "url": "/app?v=012", "description": "Platform landing page and workflow map."},
+        {"key": "context", "title": "Mission Context", "url": "/context?v=012", "description": "AOI, collections, time window and data quality status."},
+        {"key": "reporting", "title": "Reporting", "url": "/reporting?v=012", "description": "End-state flight safety, operations, J2 and export pages."},
+        {"key": "engineering", "title": "Engineering", "url": "/engineering?v=012", "description": "Technical evidence, RF analysis, map layers and diagnostics."},
+        {"key": "system", "title": "System", "url": "/system?v=012", "description": "Health, deployment checks, logs and app map."},
+    ]
+    sections = {
+        "reporting": [
+            {"key": "flight-safety", "title": "Flight Safety Brief", "url": "/reporting/flight-safety?v=012", "legacy_url": "/lantern?v=012", "description": "Pilot-facing GNSS/RF burden and clearest observed constellation/band."},
+            {"key": "mission-brief", "title": "Mission Operations Brief", "url": "/reporting/mission-brief?v=012", "legacy_url": "/static/mission_brief.html?v=091", "description": "Senior/ops readiness summary, caveats and decision-support brief."},
+            {"key": "j2", "title": "J2 Live Report", "url": "/reporting/j2?v=012", "legacy_url": "/static/j2_report.html?v=115", "description": "OSINT articles, threat actors, aviation/security context and source log."},
+            {"key": "gnss-serviceability", "title": "GNSS Serviceability", "url": "/reporting/gnss-serviceability?v=012", "description": "GPS/GNSS serviceability decision support and required receiver checks."},
+            {"key": "candidate-report", "title": "Candidate Site Report", "url": "/reporting/candidate?v=012", "description": "End-state antenna/candidate report and PDF entry point."},
+            {"key": "evidence-log", "title": "Source / Evidence Log", "url": "/reporting/evidence-log?v=012", "description": "Traceable collections, OSINT/source items and evidence register."},
+            {"key": "export-pack", "title": "Export Pack", "url": "/reporting/export?v=012", "description": "Mission report, J2 source log, candidate assessment and archive links."},
+        ],
+        "engineering": [
+            {"key": "data-quality", "title": "Data Quality Detail", "url": "/engineering/data-quality?v=012", "legacy_url": "/static/data_quality.html?v=080", "description": "Import quality, scan coverage, reject/flag detail and confidence."},
+            {"key": "rf", "title": "RF Analyst", "url": "/engineering/rf?v=012", "legacy_url": "/static/launch_analysis.html?v=075", "description": "Launch windows, L1/L2/L5 timelines, spectrum/spikes and pattern-of-life."},
+            {"key": "spectrum", "title": "Spectrum / Spikes", "url": "/engineering/spectrum?v=012", "legacy_url": "/static/launch_analysis.html?v=075#spectrum", "description": "Technical spectrum bins, dBm values, busy frequencies and abnormal spikes."},
+            {"key": "map", "title": "Map / H3 Layers", "url": "/engineering/map?v=012", "legacy_url": "/?v=012", "description": "Raw map, H3 layers, RF burden, suitability and confidence overlays."},
+            {"key": "candidates", "title": "Candidate Engineering", "url": "/engineering/candidates?v=012", "legacy_url": "/?v=012#candidates", "description": "Candidate scoring, comparison, evidence drill-down and engineering view."},
+            {"key": "pattern-of-life", "title": "Pattern of Life", "url": "/engineering/pattern-of-life?v=012", "description": "Recurring quiet/noisy periods by hour, day, week or month."},
+            {"key": "imports", "title": "Import Diagnostics", "url": "/engineering/import-diagnostics?v=012", "description": "CSV import, parser status, quality mode and source file notes."},
+            {"key": "api-viewer", "title": "API Payload Viewer", "url": "/engineering/api-viewer?v=012", "description": "Developer-facing endpoint/payload inspection without leaving the app."},
+        ],
+        "system": [
+            {"key": "status", "title": "System Status", "url": "/system/status?v=012", "description": "Runtime, database, static page and API status."},
+            {"key": "deploy-check", "title": "Deploy Check", "url": "/system/deploy-check?v=012", "legacy_url": "/api/platform/deploy-check", "description": "Runtime dependencies, static files and deployment readiness."},
+            {"key": "logs", "title": "Logs", "url": "/system/logs?v=012", "description": "Local stdout/stderr log file pointers and support checks."},
+            {"key": "app-map", "title": "App Map", "url": "/system/app-map?v=012", "description": "Current route map, overlap notes and canonical ownership."},
+            {"key": "health-json", "title": "Health JSON", "url": "/api/platform/health", "description": "Raw platform health payload."},
+        ],
+    }
+    for item in primary:
+        item["available"] = _v012_page_exists(item.get("url", ""))
+    for items in sections.values():
+        for item in items:
+            item["available"] = _v012_page_exists(item.get("url", "")) or _v012_page_exists(item.get("legacy_url", ""))
+    groups = [
+        {"group": "Home", "key": "home", "items": [primary[0]]},
+        {"group": "Mission Context", "key": "context", "items": [primary[1]]},
+        {"group": "Reporting", "key": "reporting", "items": sections["reporting"]},
+        {"group": "Engineering", "key": "engineering", "items": sections["engineering"]},
+        {"group": "System", "key": "system", "items": sections["system"]},
+    ]
+    return {"primary": primary, "sections": sections, "groups": groups}
+
+
+def _v012_db_summary() -> dict[str, _V012Any]:
+    db_path = None
+    try:
+        db_path = DB_PATH  # type: ignore[name-defined]
+    except Exception:
+        pass
+    out: dict[str, _V012Any] = {
+        "path": str(db_path) if db_path is not None else None,
+        "exists": bool(db_path and _V012Path(db_path).exists()),
+        "collection_count": None,
+        "total_event_count": None,
+        "valid_event_count": None,
+        "first_timestamp_utc": None,
+        "last_timestamp_utc": None,
+    }
+    try:
+        conn = connect()  # type: ignore[name-defined]
+        try:
+            out["collection_count"] = int(conn.execute("SELECT COUNT(*) FROM moth_collections").fetchone()[0] or 0)
+            row = conn.execute("""
+                SELECT COUNT(*) AS total,
+                       SUM(CASE WHEN valid = 1 THEN 1 ELSE 0 END) AS valid,
+                       MIN(timestamp_utc) AS first_ts,
+                       MAX(timestamp_utc) AS last_ts
+                FROM moth_events
+            """).fetchone()
+            out["total_event_count"] = int(row[0] or 0)
+            out["valid_event_count"] = int(row[1] or 0)
+            out["first_timestamp_utc"] = row[2]
+            out["last_timestamp_utc"] = row[3]
+        finally:
+            conn.close()
+    except Exception as exc:
+        out["error"] = str(exc)
+    return out
+
+
+def _v012_quality_summary() -> dict[str, _V012Any]:
+    try:
+        q = get_latest_quality_summary(DB_PATH)  # type: ignore[name-defined]
+        latest = q.get("latest") if isinstance(q, dict) else None
+        if latest:
+            raw = int(latest.get("raw_rows") or 0)
+            rejected = int(latest.get("rejected_rows") or 0)
+            flagged = int(latest.get("flagged_rows") or 0)
+            if raw <= 0:
+                level = "NO DATA"
+            elif rejected == 0 and flagged == 0:
+                level = "GOOD"
+            elif rejected <= max(10, raw * 0.05):
+                level = "CHECK"
+            else:
+                level = "LOW"
+            return {"available": True, "level": level, "latest": latest, "message": q.get("message")}
+        return {"available": False, "level": "NO DATA", "latest": None, "message": q.get("message") if isinstance(q, dict) else "No quality summary."}
+    except Exception as exc:
+        return {"available": False, "level": "CHECK", "latest": None, "error": str(exc)}
+
+
+def _v012_module_ok(name: str) -> bool:
+    try:
+        return _v012_importlib_util.find_spec(name) is not None
+    except Exception:
+        return False
+
+
+def _v012_static_file_checks() -> dict[str, bool]:
+    static = _v012_static_dir()
+    names = [
+        "platform_home.html", "mission_context.html", "reporting_home.html", "engineering_home.html", "system_home.html", "app_map.html",
+        "api_viewer.html", "platform_shell.css", "platform_shell.js", "platform_navigation.json", "lantern_flight_safety.html",
+        "mission_brief.html", "j2_report.html", "launch_analysis.html", "data_quality.html", "index.html",
+    ]
+    return {name: (static / name).exists() for name in names}
+
+
+def _v012_route_payload() -> list[dict[str, _V012Any]]:
+    out = []
+    try:
+        for route in app.routes:  # type: ignore[name-defined]
+            path = getattr(route, "path", None)
+            methods = sorted(getattr(route, "methods", []) or [])
+            name = getattr(route, "name", "")
+            if path:
+                out.append({"path": path, "methods": methods, "name": name})
+    except Exception:
+        pass
+    return sorted(out, key=lambda r: (r.get("path") or "", ",".join(r.get("methods") or [])))
+
+
+@app.get("/app", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_platform_home() -> str:
+    return _v012_static_page("platform_home.html", "EEI LANTERN Platform Home")
+
+
+@app.get("/context", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_context_page() -> str:
+    return _v012_static_page("mission_context.html", "EEI LANTERN Mission Context")
+
+
+@app.get("/reporting", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_reporting_home() -> str:
+    return _v012_static_page("reporting_home.html", "EEI LANTERN Reporting")
+
+
+@app.get("/engineering", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_engineering_home() -> str:
+    return _v012_static_page("engineering_home.html", "EEI LANTERN Engineering")
+
+
+@app.get("/system", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_system_home() -> str:
+    return _v012_static_page("system_home.html", "EEI LANTERN System")
+
+
+@app.get("/reporting/flight-safety", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_reporting_flight_safety() -> str:
+    return _v012_static_page("lantern_flight_safety.html", "EEI LANTERN Flight Safety Brief")
+
+
+@app.get("/reporting/mission-brief", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_reporting_mission_brief() -> str:
+    return _v012_static_page("mission_brief.html", "EEI LANTERN Mission Operations Brief")
+
+
+@app.get("/reporting/j2", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_reporting_j2() -> str:
+    return _v012_static_page("j2_report.html", "EEI LANTERN J2 Live Report")
+
+
+@app.get("/reporting/gnss-serviceability", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_reporting_gnss_serviceability() -> str:
+    return _v012_static_page("gnss_serviceability.html", "EEI LANTERN GNSS Serviceability")
+
+
+@app.get("/reporting/candidate", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_reporting_candidate() -> str:
+    return _v012_static_page("candidate_report.html", "EEI LANTERN Candidate Site Report")
+
+
+@app.get("/reporting/evidence-log", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_reporting_evidence_log() -> str:
+    return _v012_static_page("evidence_log.html", "EEI LANTERN Source / Evidence Log")
+
+
+@app.get("/reporting/export", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_reporting_export() -> str:
+    return _v012_static_page("export_pack.html", "EEI LANTERN Export Pack")
+
+
+@app.get("/engineering/data-quality", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_engineering_data_quality() -> str:
+    return _v012_static_page("data_quality.html", "EEI LANTERN Data Quality Detail")
+
+
+@app.get("/engineering/rf", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_engineering_rf() -> str:
+    return _v012_static_page("launch_analysis.html", "EEI LANTERN RF Analyst")
+
+
+@app.get("/engineering/spectrum", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_engineering_spectrum() -> str:
+    return _v012_static_page("launch_analysis.html", "EEI LANTERN Spectrum / Spikes")
+
+
+@app.get("/engineering/map", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_engineering_map() -> str:
+    return _v012_static_page("index.html", "EEI LANTERN Map / H3 Layers")
+
+
+@app.get("/engineering/candidates", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_engineering_candidates() -> str:
+    return _v012_static_page("index.html", "EEI LANTERN Candidate Engineering")
+
+
+@app.get("/engineering/pattern-of-life", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_engineering_pattern_of_life() -> str:
+    return _v012_static_page("pattern_of_life.html", "EEI LANTERN Pattern of Life")
+
+
+@app.get("/engineering/import-diagnostics", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_engineering_import_diagnostics() -> str:
+    return _v012_static_page("import_diagnostics.html", "EEI LANTERN Import Diagnostics")
+
+
+@app.get("/engineering/api-viewer", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_engineering_api_viewer() -> str:
+    return _v012_static_page("api_viewer.html", "EEI LANTERN API Payload Viewer")
+
+
+@app.get("/system/status", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_system_status() -> str:
+    return _v012_static_page("system_home.html", "EEI LANTERN System Status")
+
+
+@app.get("/system/deploy-check", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_system_deploy_check() -> str:
+    return _v012_static_page("system_home.html", "EEI LANTERN Deploy Check")
+
+
+@app.get("/system/logs", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_system_logs() -> str:
+    return _v012_static_page("system_home.html", "EEI LANTERN Logs")
+
+
+@app.get("/system/app-map", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_system_app_map() -> str:
+    return _v012_static_page("app_map.html", "EEI LANTERN App Map")
+
+
+@app.get("/api/platform/navigation")  # type: ignore[name-defined]
+def lantern_v012_platform_navigation() -> dict[str, _V012Any]:
+    registry = _v012_nav_registry()
+    return {
+        "status": "ok",
+        "platform_version": _LANTERN_PLATFORM_VERSION,
+        "generated_utc": _v012_now(),
+        **registry,
+        "notes": [
+            "Primary navigation is now Home, Mission Context, Reporting, Engineering, System.",
+            "Reporting owns end-state decision/reporting outputs.",
+            "Engineering owns technical evidence generation, diagnostics and analyst tooling.",
+            "Legacy URLs remain available as compatibility entry points.",
+        ],
+    }
+
+
+@app.get("/api/platform/mission-context")  # type: ignore[name-defined]
+def lantern_v012_platform_mission_context() -> dict[str, _V012Any]:
+    db = _v012_db_summary()
+    quality = _v012_quality_summary()
+    return {
+        "status": "ok",
+        "platform_version": _LANTERN_PLATFORM_VERSION,
+        "generated_utc": _v012_now(),
+        "aoi": "Aden Adde / Mogadishu",
+        "collections": {
+            "count": db.get("collection_count"),
+            "selected": "all loaded unless page filter overrides",
+            "total_events": db.get("total_event_count"),
+            "valid_events": db.get("valid_event_count"),
+        },
+        "time_window": {
+            "first_timestamp_utc": db.get("first_timestamp_utc"),
+            "last_timestamp_utc": db.get("last_timestamp_utc"),
+            "selected": "all available unless page filter overrides",
+        },
+        "data_quality": quality,
+        "rf_threshold": "-60 dBm strong-spike/reporting reference unless page filter overrides",
+        "gnss_mode": "GPS/Galileo/GLONASS/BeiDou L-band clearance view where supported",
+        "interpretation_boundary": "LANTERN is decision support. MOTH detections are event-based; no detection does not prove a band is empty.",
+    }
+
+
+@app.get("/api/platform/health")  # type: ignore[name-defined]
+def lantern_v012_platform_health() -> dict[str, _V012Any]:
+    return {
+        "status": "ok",
+        "platform_version": _LANTERN_PLATFORM_VERSION,
+        "generated_utc": _v012_now(),
+        "static_dir": str(_v012_static_dir()),
+        "static_files": _v012_static_file_checks(),
+        "database": _v012_db_summary(),
+        "mission_context": "/api/platform/mission-context",
+        "navigation_url": "/api/platform/navigation",
+        "home_url": "/app?v=012",
+        "route_count": len(_v012_route_payload()),
+    }
+
+
+@app.get("/api/platform/app-map")  # type: ignore[name-defined]
+def lantern_v012_platform_app_map() -> dict[str, _V012Any]:
+    registry = _v012_nav_registry()
+    overlaps = [
+        {"area": "GNSS/RF", "pages": ["Flight Safety Brief", "RF Analyst"], "decision": "Keep. Reporting summarizes; Engineering explains."},
+        {"area": "Mission readiness", "pages": ["Mission Operations Brief", "Flight Safety Brief"], "decision": "Keep as shared evidence. Mission Brief should consume the Flight Safety summary."},
+        {"area": "J2/security", "pages": ["Mission Operations Brief", "J2 Live Report"], "decision": "Keep. J2 owns source detail; Mission Brief only shows summary."},
+        {"area": "Candidate scoring", "pages": ["Candidate Site Report", "Map / Candidate Engineering"], "decision": "Keep. Engineering creates evidence; Reporting packages the end-state recommendation."},
+        {"area": "Map colours", "pages": ["Antenna suitability", "RF burden/quietness"], "decision": "Keep separate legends. Green means different things depending on layer type."},
+        {"area": "Old /rotator", "pages": ["J2 Live Report"], "decision": "Do not restore /rotator. Article rotation belongs inside J2 Live Report."},
+    ]
+    return {"status": "ok", "platform_version": _LANTERN_PLATFORM_VERSION, "generated_utc": _v012_now(), "navigation": registry, "overlaps": overlaps, "routes": _v012_route_payload()}
+
+
+@app.get("/api/platform/deploy-check")  # type: ignore[name-defined]
+def lantern_v012_platform_deploy_check() -> dict[str, _V012Any]:
+    static = _v012_static_dir()
+    db = _v012_db_summary()
+    checks: list[dict[str, _V012Any]] = []
+    checks.append({"name": "Python", "status": "pass", "detail": _v012_sys.version.split()[0]})
+    checks.append({"name": "Database path", "status": "pass" if db.get("exists") else "warn", "detail": db.get("path") or "DB_PATH unavailable"})
+    for name, exists in _v012_static_file_checks().items():
+        required = name in {"platform_home.html", "mission_context.html", "reporting_home.html", "engineering_home.html", "system_home.html", "platform_shell.css", "platform_shell.js"}
+        status = "pass" if exists else "fail" if required else "warn"
+        checks.append({"name": f"Static file: {name}", "status": status, "detail": str(static / name)})
+    for mod in ["fastapi", "uvicorn", "pandas", "h3", "orjson", "pydantic"]:
+        checks.append({"name": f"Python module: {mod}", "status": "pass" if _v012_module_ok(mod) else "fail", "detail": "available" if _v012_module_ok(mod) else "missing"})
+    for mod in ["webview", "PyInstaller"]:
+        checks.append({"name": f"Optional packaging module: {mod}", "status": "pass" if _v012_module_ok(mod) else "warn", "detail": "available" if _v012_module_ok(mod) else "optional; install for desktop packaging"})
+    route_checks = [
+        ("/app", _v012_route_exists("/app")),
+        ("/context", _v012_route_exists("/context")),
+        ("/reporting", _v012_route_exists("/reporting")),
+        ("/engineering", _v012_route_exists("/engineering")),
+        ("/system", _v012_route_exists("/system")),
+        ("/api/platform/navigation", _v012_route_exists("/api/platform/navigation")),
+        ("/api/platform/mission-context", _v012_route_exists("/api/platform/mission-context")),
+    ]
+    for path, exists in route_checks:
+        checks.append({"name": f"Route: {path}", "status": "pass" if exists else "fail", "detail": "registered" if exists else "missing"})
+    fail_count = sum(1 for c in checks if c.get("status") == "fail")
+    warn_count = sum(1 for c in checks if c.get("status") == "warn")
+    return {
+        "status": "ready" if fail_count == 0 else "not_ready",
+        "platform_version": _LANTERN_PLATFORM_VERSION,
+        "generated_utc": _v012_now(),
+        "fail_count": fail_count,
+        "warn_count": warn_count,
+        "checks": checks,
+        "deployment_guidance": [
+            "Use /app?v=012 as the only platform home.",
+            "Use Reporting for end-state outputs.",
+            "Use Engineering for technical evidence and diagnostics.",
+            "Use Start_LANTERN_Local.ps1 or LANTERN_App.ps1 after deploy-check has no failures.",
+        ],
+    }
+
+
+@app.get("/api/platform/routes")  # type: ignore[name-defined]
+def lantern_v012_platform_routes() -> dict[str, _V012Any]:
+    return {"status": "ok", "platform_version": _LANTERN_PLATFORM_VERSION, "generated_utc": _v012_now(), "routes": _v012_route_payload()}
+
+
+# Compatibility check retained for stale pages that still call the old J2 rotator status endpoint.
+def _v012_j2_live_payload() -> dict[str, _V012Any]:
+    static = _v012_static_dir()
+    return {
+        "ok": (static / "j2_report.html").exists() and (_v012_route_exists("/api/j2/news") or _v012_route_exists("/api/j2/report")),
+        "status": "ok",
+        "platform_version": _LANTERN_PLATFORM_VERSION,
+        "compatibility_endpoint": True,
+        "files": {
+            "j2_report_html": (static / "j2_report.html").exists(),
+            "rotator_html_required": False,
+            "rotator_html_present": (static / "rotator.html").exists(),
+        },
+        "routes": {
+            "j2_news": _v012_route_exists("/api/j2/news"),
+            "j2_report": _v012_route_exists("/api/j2/report"),
+            "j2_threat_actors": _v012_route_exists("/api/j2/threat-actors") or _v012_route_exists("/api/j2/threat_actors"),
+            "legacy_rotator_route_removed": not _v012_route_exists("/rotator"),
+        },
+        "urls": {"j2_live_report": "/reporting/j2?v=012", "legacy_rotator": "not used"},
+        "note": "The display /rotator route is not used. The correct live article rotator is inside J2 Live Report.",
+    }
+
+
+@app.get("/api/platform/j2-live-check")  # type: ignore[name-defined]
+def lantern_v012_j2_live_check() -> dict[str, _V012Any]:
+    return _v012_j2_live_payload()
+
+
+@app.get("/api/platform/j2-rotator-check")  # type: ignore[name-defined]
+def lantern_v012_j2_rotator_check_compat() -> dict[str, _V012Any]:
+    return _v012_j2_live_payload()
+
+# ---- end EEI LANTERN v0.12.0 Navigation Rationalisation layer ----
+

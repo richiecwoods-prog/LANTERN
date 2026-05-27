@@ -1,155 +1,50 @@
-// EEI LANTERN v0.11.1 global platform navigation shell
-(function () {
+// EEI LANTERN v0.12 global platform navigation shell
+(function(){
   'use strict';
-
-  // EEI-LANTERN-J2-NO-SHELL-GUARD: Some purpose-built pages, including the J2 live report,
-  // carry their own single-page command header. Do not mount the global shell there.
-  if (document.querySelector('meta[name="eei-no-platform-shell"]') ||
-      (document.body && document.body.dataset && document.body.dataset.noPlatformShell === 'true') ||
-      window.location.pathname.replace(/\/+$/, '').endsWith('/static/j2_report.html')) return;
-
-
-  if (window.__EEI_LANTERN_PLATFORM_SHELL__) return;
+  if(window.__EEI_LANTERN_PLATFORM_SHELL__) return;
   window.__EEI_LANTERN_PLATFORM_SHELL__ = true;
-
-  const VERSION = '0.11.1';
-  const DEFAULT_GROUPS = [
-    {
-      group: 'Briefing',
-      items: [
-        { title: 'Platform Home', url: '/app?v=0111', description: 'Role-based start page and deployment status.' },
-        { title: 'Flight Safety Brief', url: '/lantern?v=0111', description: 'Pilot and flight-safety GNSS clearance view.' },
-        { title: 'Mission Brief', url: '/static/mission_brief.html?v=091', description: 'RF readiness and mission summary.' },
-        { title: 'J2 Article Rotator', url: '/static/j2_report.html?v=113', description: 'J2/JSP 101 report controls and preview.' },
-        { title: 'JSP 101 Report', url: '/api/mission/report-jsp101.html', description: 'Direct printable structured RF mission report.' }
-      ]
-    },
-    {
-      group: 'Operations',
-      items: [
-        { title: 'Map / Candidates', url: '/?v=0111', description: 'Upload scans, view map, add and score antenna candidates.' },
-        { title: 'Data Quality', url: '/static/data_quality.html?v=080', description: 'Check scan quality before briefing outputs.' },
-        { title: 'Simple Briefing Cards', url: '/static/briefing.html?v=080', description: 'Plain-English decision cards.' },
-        { title: 'J2 Article Rotator', url: '/static/j2_report.html?v=113', description: 'Cycle platform pages on a briefing display.' }
-      ]
-    },
-    {
-      group: 'Analyst',
-      items: [
-        { title: 'Launch RF Analyst', url: '/static/launch_analysis.html?v=075', description: 'L1/L2/L5 timelines, spectrum and spike analysis.' },
-        { title: 'Raw Map Dashboard', url: '/static/index.html?v=0111', description: 'Direct static dashboard view if needed.' }
-      ]
-    },
-    {
-      group: 'System',
-      items: [
-        { title: 'Platform Health', url: '/api/platform/health', description: 'Backend, database and static page health.' },
-        { title: 'Deploy Check', url: '/api/platform/deploy-check', description: 'Runtime, static file and database checks.' },
-        { title: 'J2 / Rotator Check', url: '/api/platform/j2-rotator-check', description: 'Checks restored J2 and rotator assets.' }
-      ]
-    }
-  ];
-
-  function currentPath() {
-    return window.location.pathname.replace(/\/+$/, '') || '/';
+  const VERSION = '0.12.0';
+  const DEFAULT_NAV = {
+    groups:[
+      {group:'Home', key:'home', items:[{title:'Platform Home', url:'/app?v=012', description:'Platform landing page and workflow map.'}]},
+      {group:'Mission Context', key:'context', items:[{title:'Mission Context', url:'/context?v=012', description:'AOI, collections, time window and data quality.'}]},
+      {group:'Reporting', key:'reporting', items:[
+        {title:'Flight Safety Brief', url:'/reporting/flight-safety?v=012', description:'Pilot-facing GNSS/RF burden and clearest observed constellation/band.'},
+        {title:'Mission Operations Brief', url:'/reporting/mission-brief?v=012', description:'Senior/ops readiness summary and caveats.'},
+        {title:'J2 Live Report', url:'/reporting/j2?v=012', description:'OSINT articles, threat actors and source log.'},
+        {title:'GNSS Serviceability', url:'/reporting/gnss-serviceability?v=012', description:'GPS/GNSS serviceability decision support.'},
+        {title:'Candidate Site Report', url:'/reporting/candidate?v=012', description:'End-state candidate report and PDF entry point.'},
+        {title:'Export Pack', url:'/reporting/export?v=012', description:'Mission report, source log and archive links.'}
+      ]},
+      {group:'Engineering', key:'engineering', items:[
+        {title:'Data Quality Detail', url:'/engineering/data-quality?v=012', description:'Reject/flag detail and scan quality.'},
+        {title:'RF Analyst', url:'/engineering/rf?v=012', description:'Launch windows, L1/L2/L5, spectrum and spikes.'},
+        {title:'Map / H3 Layers', url:'/engineering/map?v=012', description:'Map, H3, suitability and confidence layers.'},
+        {title:'Candidate Engineering', url:'/engineering/candidates?v=012', description:'Candidate scoring and evidence drill-down.'},
+        {title:'API Payload Viewer', url:'/engineering/api-viewer?v=012', description:'Inspect JSON endpoints.'}
+      ]},
+      {group:'System', key:'system', items:[
+        {title:'System Status', url:'/system/status?v=012', description:'Runtime, database and static status.'},
+        {title:'Deploy Check', url:'/system/deploy-check?v=012', description:'Deployment readiness.'},
+        {title:'App Map', url:'/system/app-map?v=012', description:'Route map and overlap audit.'}
+      ]}
+    ]
+  };
+  function path(){return window.location.pathname.replace(/\/+$/,'') || '/';}
+  function groupForPath(){const p=path(); if(p==='/app'||p==='/') return 'home'; if(p==='/context') return 'context'; if(p.startsWith('/reporting')||p==='/lantern'||p.includes('mission_brief')||p.includes('j2_report')) return 'reporting'; if(p.startsWith('/engineering')||p.includes('launch_analysis')||p.includes('data_quality')||p.endsWith('/index.html')) return 'engineering'; if(p.startsWith('/system')||p.startsWith('/api/platform')) return 'system'; return document.body.dataset.navGroup || 'home';}
+  function active(url){try{const u=new URL(url,location.origin);const p=u.pathname.replace(/\/+$/,'')||'/';const c=path(); if(p==='/'&&(c==='/'||c.endsWith('/index.html'))) return true; if(c==='/lantern'&&p==='/reporting/flight-safety') return true; if(c.includes('mission_brief')&&p==='/reporting/mission-brief') return true; if(c.includes('j2_report')&&p==='/reporting/j2') return true; if(c.includes('launch_analysis')&&(p==='/engineering/rf'||p==='/engineering/spectrum')) return true; if(c.includes('data_quality')&&p==='/engineering/data-quality') return true; return p===c;}catch(_){return false;}}
+  function esc(x){return String(x==null?'':x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+  function normalize(payload){if(!payload||!Array.isArray(payload.groups)) return DEFAULT_NAV.groups; return payload.groups.map(g=>({group:g.group||'Menu', key:g.key||String(g.group||'').toLowerCase(), items:Array.isArray(g.items)?g.items:[]})).filter(g=>g.items.length);}
+  async function getJson(url){const r=await fetch(url,{cache:'no-store'}); if(!r.ok) throw new Error(url+' '+r.status); return r.json();}
+  function statusClass(status){if(status==='ok'||status==='ready') return 'good'; if(status==='error'||status==='not_ready') return 'bad'; return 'check';}
+  function render(groups, health, ctx){if(document.getElementById('eei-app-shell')) return; const activeGroup=groupForPath(); const hstatus=(health&&health.status)||'check'; const sClass=statusClass(hstatus); const sText=sClass==='good'?'API online':sClass==='bad'?'API fault':'Check status';
+    const nav=groups.map(group=>{const key=group.key||String(group.group||'').toLowerCase(); const items=(group.items||[]).map(item=>`<a class="eei-link${active(item.url)?' eei-active':''}" href="${esc(item.url)}"><span class="eei-link-title">${esc(item.title)}${item.legacy_url?'<span class="eei-legacy">alias</span>':''}</span><span class="eei-link-desc">${esc(item.description||'')}</span></a>`).join(''); return `<div class="eei-group${key===activeGroup?' eei-active':''}"><button type="button" aria-haspopup="true">${esc(group.group)}</button><div class="eei-menu">${items}</div></div>`;}).join('');
+    const group = groups.find(g=>(g.key||String(g.group||'').toLowerCase())===activeGroup); const secondary = group && ['reporting','engineering','system'].includes(activeGroup) ? `<div class="eei-secondary-row eei-show"><span class="eei-secondary-label">${esc(group.group)}</span>${(group.items||[]).map(i=>`<a class="eei-secondary-link eei-${activeGroup}${active(i.url)?' eei-active':''}" href="${esc(i.url)}">${esc(i.title)}</a>`).join('')}</div>` : '<div class="eei-secondary-row"></div>';
+    const q=(ctx&&ctx.data_quality&&ctx.data_quality.level)||'NO DATA'; const qClass=q==='GOOD'?'good':q==='CHECK'||q==='MEDIUM'?'check':q==='LOW'?'low':'no-data'; const col=ctx&&ctx.collections?ctx.collections:{}; const time=ctx&&ctx.time_window?ctx.time_window:{};
+    const context=`<div class="eei-context-row"><span class="eei-context-pill"><b>AOI</b> ${esc((ctx&&ctx.aoi)||'not set')}</span><span class="eei-context-pill"><b>Collections</b> ${esc(col.selected||'all loaded')} (${esc(col.count??'—')})</span><span class="eei-context-pill"><b>Time</b> ${esc(time.first_timestamp_utc||'start')} → ${esc(time.last_timestamp_utc||'end')}</span><span class="eei-context-pill ${qClass}"><b>Data</b> ${esc(q)}</span><span class="eei-context-pill"><b>Spike</b> ${esc((ctx&&ctx.rf_threshold)||'-60 dBm')}</span><span class="eei-context-pill"><b>Mode</b> ${esc(activeGroup)}</span></div>`;
+    const shell=document.createElement('div'); shell.id='eei-app-shell'; shell.innerHTML=`<div class="eei-shell-top"><div class="eei-brand"><a href="/app?v=012">EEI LANTERN</a><span>Launch Analysis and Network Telemetry Evaluation for RF Navigation | v${VERSION}</span></div><button class="eei-toggle" type="button" aria-label="Open platform menu">Menu</button><nav class="eei-primary-nav" aria-label="EEI LANTERN platform navigation">${nav}</nav><div class="eei-actions"><span class="eei-status"><span class="eei-dot ${sClass}"></span>${esc(sText)}</span><a class="eei-action" href="/app?v=012">Home</a></div></div>${context}${secondary}`; document.body.insertBefore(shell,document.body.firstChild); document.body.classList.add('eei-shell-mounted');
+    const toggle=shell.querySelector('.eei-toggle'); if(toggle) toggle.addEventListener('click',()=>shell.classList.toggle('eei-mobile-open')); shell.querySelectorAll('.eei-group>button').forEach(btn=>btn.addEventListener('click',()=>{const g=btn.closest('.eei-group'); shell.querySelectorAll('.eei-group.eei-open').forEach(x=>{if(x!==g) x.classList.remove('eei-open')}); if(g) g.classList.toggle('eei-open');})); document.addEventListener('keydown',ev=>{if(ev.key==='Escape'){shell.classList.remove('eei-mobile-open'); shell.querySelectorAll('.eei-group.eei-open').forEach(g=>g.classList.remove('eei-open'));}});
   }
-
-  function isActive(url) {
-    try {
-      const u = new URL(url, window.location.origin);
-      const p = u.pathname.replace(/\/+$/, '') || '/';
-      const c = currentPath();
-      if (p === '/' && (c === '/' || c.endsWith('/index.html'))) return true;
-      if (p === '/j2' && (c === '/j2' || c.endsWith('/j2_report.html'))) return true;
-      if (p === '/rotator' && (c === '/rotator' || c.endsWith('/rotator.html'))) return true;
-      return p === c;
-    } catch (_err) {
-      return false;
-    }
-  }
-
-  function esc(text) {
-    return String(text == null ? '' : text)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/\"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
-
-  function normalizeGroups(payload) {
-    if (!payload || !Array.isArray(payload.groups)) return DEFAULT_GROUPS;
-    return payload.groups.map(g => ({
-      group: g.group || 'Menu',
-      items: Array.isArray(g.items) ? g.items : []
-    })).filter(g => g.items.length);
-  }
-
-  function render(groups, health) {
-    if (document.getElementById('eei-app-shell')) return;
-    const status = (health && health.status) || 'check';
-    const statusClass = status === 'ok' ? 'good' : status === 'error' ? 'bad' : 'check';
-    const statusText = status === 'ok' ? 'API online' : status === 'error' ? 'API fault' : 'Check status';
-
-    const nav = groups.map(group => {
-      const items = group.items.map(item => {
-        const active = isActive(item.url) ? ' eei-active' : '';
-        const available = item.available === false ? ' eei-unavailable' : '';
-        const suffix = item.available === false ? ' — missing' : '';
-        return `<a class="eei-shell-link${active}${available}" href="${esc(item.url)}"><span class="eei-shell-link-title">${esc(item.title)}${esc(suffix)}</span><span class="eei-shell-link-desc">${esc(item.description || '')}</span></a>`;
-      }).join('');
-      return `<div class="eei-shell-group"><button type="button" aria-haspopup="true">${esc(group.group)}</button><div class="eei-shell-menu">${items}</div></div>`;
-    }).join('');
-
-    const shell = document.createElement('div');
-    shell.id = 'eei-app-shell';
-    shell.innerHTML = `
-      <div class="eei-shell-inner">
-        <div class="eei-shell-brand"><a href="/app?v=0111">EEI LANTERN</a><span>Launch Analysis and Network Telemetry Evaluation for RF Navigation | v${VERSION}</span></div>
-        <button class="eei-shell-toggle" type="button" aria-label="Open platform menu">Menu</button>
-        <nav class="eei-shell-nav" aria-label="EEI LANTERN platform navigation">${nav}</nav>
-        <div class="eei-shell-actions">
-          <span class="eei-shell-status"><span class="eei-shell-dot ${statusClass}"></span>${esc(statusText)}</span>
-          <a class="eei-shell-action" href="/app?v=0111">Home</a>
-        </div>
-      </div>`;
-    document.body.insertBefore(shell, document.body.firstChild);
-    document.body.classList.add('eei-shell-mounted');
-
-    const toggle = shell.querySelector('.eei-shell-toggle');
-    toggle && toggle.addEventListener('click', () => shell.classList.toggle('eei-mobile-open'));
-    shell.querySelectorAll('.eei-shell-group > button').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const group = btn.closest('.eei-shell-group');
-        shell.querySelectorAll('.eei-shell-group.eei-open').forEach(g => { if (g !== group) g.classList.remove('eei-open'); });
-        group && group.classList.toggle('eei-open');
-      });
-    });
-    document.addEventListener('keydown', ev => {
-      if (ev.key === 'Escape') {
-        shell.classList.remove('eei-mobile-open');
-        shell.querySelectorAll('.eei-shell-group.eei-open').forEach(g => g.classList.remove('eei-open'));
-      }
-    });
-  }
-
-  async function getJson(url) {
-    const r = await fetch(url, { cache: 'no-store' });
-    if (!r.ok) throw new Error(String(r.status));
-    return r.json();
-  }
-
-  function start() {
-    Promise.allSettled([
-      getJson('/api/platform/navigation'),
-      getJson('/api/platform/health')
-    ]).then(results => {
-      const navPayload = results[0].status === 'fulfilled' ? results[0].value : null;
-      const health = results[1].status === 'fulfilled' ? results[1].value : { status: 'check' };
-      render(normalizeGroups(navPayload), health);
-    }).catch(() => render(DEFAULT_GROUPS, { status: 'check' }));
-  }
-
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
-  else start();
+  function start(){if(document.body && document.body.dataset && document.body.dataset.noPlatformShell==='true') return; Promise.allSettled([getJson('/api/platform/navigation'),getJson('/api/platform/health'),getJson('/api/platform/mission-context')]).then(r=>{render(normalize(r[0].status==='fulfilled'?r[0].value:null), r[1].status==='fulfilled'?r[1].value:{status:'check'}, r[2].status==='fulfilled'?r[2].value:null);}).catch(()=>render(DEFAULT_NAV.groups,{status:'check'},null));}
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start); else start();
 })();
