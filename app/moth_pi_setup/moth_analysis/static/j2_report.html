@@ -1,295 +1,388 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>EEI LANTERN | J2 Live Report</title>
+  <meta name="eei-no-platform-shell" content="true" />
+  <title>EEI LANTERN J2 Live Report v0.11.5</title>
   <style>
-    :root {
-      --bg: #0d1520;
-      --panel: #111f2d;
-      --panel2: #16283a;
-      --line: #29445f;
-      --text: #eef4f8;
-      --muted: #a9bac8;
-      --blue: #58a6ff;
-      --green: #3fb950;
-      --amber: #d29922;
-      --red: #f85149;
-      --white: #fff;
+    :root{
+      --bg:#07111d; --panel:#102235; --panel2:#0c1b2b; --panel3:#071827; --line:#2b5a84; --line2:#1e3e5d;
+      --text:#eef6ff; --muted:#a7bfd8; --soft:#c7dced; --accent:#1f6aa5; --accent2:#f2c14e;
+      --red:#ff5b66; --green:#3fd47f; --amber:#f4b640; --blue:#8fd0ff;
     }
-    * { box-sizing: border-box; }
-    body { margin:0; font-family: Arial, Helvetica, sans-serif; background: var(--bg); color: var(--text); }
-    header { padding: 18px 22px; border-bottom: 1px solid var(--line); background: #0a111a; position: sticky; top: 0; z-index: 10; }
-    h1 { margin: 0; font-size: 22px; letter-spacing: .03em; }
-    .subtitle { margin-top: 4px; color: var(--muted); font-size: 12px; }
-    main { padding: 18px 22px 40px; max-width: 1500px; margin: 0 auto; }
-    .topbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
-    button, a.button { background: #18324b; border: 1px solid #315b81; color: var(--text); padding: 8px 10px; border-radius: 6px; cursor: pointer; text-decoration: none; font-weight: 700; }
-    button:hover, a.button:hover { background: #204463; }
-    input { background: #07111c; color: var(--text); border: 1px solid var(--line); padding: 8px; border-radius: 6px; }
-    label { color: var(--muted); font-size: 12px; }
-    .status-grid { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 10px; margin: 14px 0; }
-    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 13px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
-    .card h2 { margin: 0 0 10px; font-size: 16px; color: var(--white); }
-    .card h3 { margin: 12px 0 8px; font-size: 13px; color: var(--blue); }
-    .status-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
-    .status-value { font-size: 24px; font-weight: 900; margin-top: 5px; }
-    .GREEN, .NORMAL, .LOW { color: var(--green); }
-    .AMBER, .CAUTION, .MODERATE, .HIGH, .HIGHCAUTION { color: var(--amber); }
-    .RED, .SEVERE, .RESTRICTED { color: var(--red); }
-    .NODATA { color: #c9d1d9; }
-    .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0 10px; }
-    .tab { background: #10263a; }
-    .tab.active { background: #275a84; }
-    .tab-panel { display: none; }
-    .tab-panel.active { display: block; }
-    .grid-2 { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    th, td { border-bottom: 1px solid var(--line); padding: 8px 6px; text-align: left; vertical-align: top; }
-    th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
-    a { color: #79c0ff; }
-    ul { margin: 8px 0 0 18px; padding: 0; }
-    li { margin: 6px 0; }
-    .muted { color: var(--muted); }
-    .small { font-size: 11px; color: var(--muted); }
-    .warn { border-left: 5px solid var(--red); }
-    .good { border-left: 5px solid var(--green); }
-    .amber { border-left: 5px solid var(--amber); }
-    .mono { font-family: Consolas, Menlo, monospace; font-size: 12px; white-space: pre-wrap; }
-    .pill { display:inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; margin: 2px; background: #0b1724; }
-    .footer { margin-top: 18px; color: var(--muted); font-size: 11px; }
-    @media (max-width: 1000px) {
-      .status-grid, .grid-2 { grid-template-columns: 1fr; }
-      header { position: static; }
-    }
-    @media print {
-      body { background: white; color: black; }
-      header, .card { background: white; color: black; box-shadow: none; }
-      .topbar, .tabs { display: none; }
-      .tab-panel { display: block; page-break-inside: avoid; }
-      a { color: black; }
-    }
+    *{box-sizing:border-box}
+    html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.35}
+    body{padding-top:0!important} a{color:#8fd0ff} a:visited{color:#b7a6ff}
+    .appbar{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:12px 16px;border-bottom:1px solid var(--line2);background:linear-gradient(180deg,#06101b,#081523);box-shadow:0 10px 30px rgba(0,0,0,.22)}
+    .brandBlock{min-width:260px}.brand{font-size:18px;font-weight:900;letter-spacing:.08em}.sub{font-size:12px;color:var(--muted);margin-top:2px}
+    .topnav{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}.topnav a,.topnav button,.btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid #3574aa;background:#102a42;color:#fff;text-decoration:none;border-radius:7px;padding:8px 11px;font-weight:800;font-size:12px;cursor:pointer}.topnav a:hover,.btn:hover{filter:brightness(1.12)}.topnav .primary,.btn.primary{background:#1d6ca4}.btn.secondary{background:#102a42}.btn.ghost{background:#071827}.btn:disabled{opacity:.55;cursor:not-allowed}.apiStatus{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;margin-left:6px}.dot{width:9px;height:9px;border-radius:99px;background:#777}.dot.ok{background:#2bd468}.dot.bad{background:#ff5b66}.dot.check{background:#f4b640}
+    .wrap{max-width:1540px;margin:0 auto;padding:24px 22px 96px}.hero{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px}.title{font-size:28px;font-weight:900;margin:0 0 4px;letter-spacing:.02em}.caption{font-size:13px;color:#c8d7e8}.last{font-size:12px;color:var(--muted);text-align:right;min-width:250px}
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:12px 0 18px;border-bottom:1px solid #21415f}.toolbar label{font-size:12px;color:#b9cce2}.input{background:#071827;color:white;border:1px solid #2f5a82;border-radius:6px;padding:8px 9px;min-width:190px}.check{display:flex;gap:6px;align-items:center}
+    .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:24px 0 12px}.card{background:var(--panel);border:1px solid #2e567e;border-radius:10px;padding:14px;min-height:132px;display:flex;flex-direction:column;justify-content:flex-start;gap:7px;overflow:hidden}.card .label{color:#b7cbe2;font-size:12px;font-weight:900;letter-spacing:.09em;text-transform:uppercase}.card .value{display:block;font-size:25px;line-height:1.05;font-weight:950;letter-spacing:.02em;word-break:normal}.card .detail{display:block;color:#cfe0f1;font-size:12px;line-height:1.32;overflow-wrap:break-word}.card.good .value,.card.live .value,.card.low .value{color:var(--green)}.card.check .value,.card.watch .value,.card.medium .value,.card.source .value{color:var(--amber)}.card.bad .value,.card.elevated .value,.card.red .value{color:#ff8e98}.card.nodata .value{color:#d6dde7}
+    .summary{background:var(--panel);border:1px solid #2e567e;border-left:5px solid var(--accent2);border-radius:10px;padding:14px 16px;margin:12px 0}.summary h2{font-size:17px;margin:0 0 10px}.summary p{margin:7px 0}.statusLine{font-size:12px;color:#b7cee4;margin-top:7px}.okText{color:#85ffb1}.error{color:#ff9b9b;white-space:pre-wrap}
+    .tabs{display:flex;gap:7px;flex-wrap:wrap;margin:18px 0 10px}.tab{background:#102a42;border:1px solid #2d577e;color:#fff;padding:9px 13px;border-radius:7px;font-weight:800;cursor:pointer}.tab.active{background:#1f6aa5}.tabPage.hidden{display:none!important}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.panel{background:var(--panel);border:1px solid #2e567e;border-radius:10px;padding:14px;min-height:110px;margin-bottom:12px}.panel h2,.panel h3{margin:0 0 10px}.panel h2{font-size:18px}.panel h3{font-size:15px;text-transform:uppercase;letter-spacing:.08em;color:#cce8ff}.safety{border-left:5px solid var(--red)}.accent{border-left:5px solid var(--accent2)}.muted{color:var(--muted)}.small{font-size:12px;color:var(--muted)}
+    ul.clean{margin:6px 0 0 18px;padding:0}ul.clean li{margin:7px 0;line-height:1.35}.pill{display:inline-block;border:1px solid #41698d;background:#0b1c2d;color:#cfe1f3;border-radius:99px;padding:3px 8px;font-size:11px;margin:2px;font-weight:800}.pill.actor{border-color:#bb7b2c;color:#ffd89a}.pill.live{border-color:#1d9a62;color:#bff6d7}.pill.warn{border-color:#b15d2e;color:#ffd0a3}.pill.red{border-color:#b53d47;color:#ffc5cc}.pill.rf{border-color:#4f98c8;color:#bde8ff}
+    table{width:100%;border-collapse:collapse;margin-top:8px}th,td{border-bottom:1px solid #213d58;padding:9px;text-align:left;vertical-align:top}th{color:#bcd1e8;background:#0a1a2a;font-size:12px;text-transform:uppercase;letter-spacing:.05em}td{color:#eef6ff;font-size:13px}
+    .actorGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}.actorCard{background:#0a1b2b;border:1px solid #315c83;border-radius:10px;padding:13px}.actorTitle{font-size:18px;font-weight:950}.actorType{font-size:12px;color:#ffcf8a;text-transform:uppercase;letter-spacing:.08em;margin:3px 0 10px}.actorCard p{margin:7px 0}.articleList{display:grid;gap:10px}.article{border:1px solid #294f75;background:#081927;border-radius:10px;padding:11px}.articleTitle{font-weight:900;font-size:15px;margin-bottom:4px}.articleMeta{font-size:12px;color:#a9bfd6;margin-bottom:7px}.articleSummary{font-size:13px;line-height:1.35;color:#e7f0fa}.filterBar{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 12px}
+    .feed{position:fixed;right:18px;bottom:18px;width:410px;max-width:calc(100vw - 36px);background:#091522;border:1px solid #3b638b;border-radius:12px;box-shadow:0 14px 44px rgba(0,0,0,.45);overflow:hidden;z-index:80}.feedHead{display:flex;justify-content:space-between;align-items:center;background:#185b8d;padding:10px 12px}.feedTitle{font-weight:900;letter-spacing:.04em}.feedBtns button{font-size:11px;padding:4px 8px;border-radius:5px;border:1px solid #4d86b6;background:#246a9e;color:white;cursor:pointer}.feedBody{padding:12px;min-height:135px;max-height:260px;overflow:auto}.feedFoot{font-size:11px;color:#a9bfd6;border-top:1px solid #213d58;padding:7px 10px}
+    @media(max-width:1000px){.grid{grid-template-columns:1fr}.hero{display:block}.last{text-align:left;margin-top:8px}.feed{position:static;width:auto;margin:18px 22px}.wrap{padding-bottom:32px}.topnav{justify-content:flex-start}.appbar{display:block}.brandBlock{margin-bottom:8px}}
+    @media(max-width:620px){.cards{grid-template-columns:1fr}.toolbar{display:block}.toolbar .btn,.toolbar label{margin:5px 3px}.input{width:100%;min-width:0}.title{font-size:23px}}
+    @media print{.appbar,.toolbar,.tabs,.feed,.btn,.topnav{display:none!important}body{background:#fff;color:#111}.wrap{max-width:none;padding:0}.card,.panel,.summary,.actorCard,.article{background:#fff;color:#111;border-color:#999}.card .label,th,.small,.caption,.sub,.last,.muted{color:#444}td{color:#111}.tabPage.hidden{display:block!important}}
   </style>
 </head>
-<body>
-<header>
-  <h1>EEI LANTERN J2 Live Report</h1>
-  <div class="subtitle">GNSS / RF | Aviation | Public-source threat actor awareness | Source-traceable decision support</div>
-  <div class="topbar">
-    <button id="refreshBtn">Refresh live OSINT</button>
-    <button id="cachedBtn">Load cached</button>
-    <button onclick="window.print()">Print / save PDF</button>
-    <a class="button" href="/">LANTERN Home</a>
-    <label>AOI <input id="aoiName" value="Aden Adde / Mogadishu" size="28"></label>
-    <label>Collections <input id="collectionIds" placeholder="e.g. 1,2,3" size="12"></label>
-    <label><input type="checkbox" id="autoRefresh"> Auto refresh 5 min</label>
-  </div>
-</header>
-<main>
-  <div class="status-grid">
-    <div class="card"><div class="status-label">Overall J2</div><div id="overall" class="status-value NODATA">NO DATA</div></div>
-    <div class="card"><div class="status-label">GNSS/RF</div><div id="gnss" class="status-value NODATA">NO DATA</div></div>
-    <div class="card"><div class="status-label">Security</div><div id="security" class="status-value NODATA">NO DATA</div></div>
-    <div class="card"><div class="status-label">Aviation</div><div id="aviation" class="status-value NODATA">NO DATA</div></div>
-    <div class="card"><div class="status-label">Confidence</div><div id="confidence" class="status-value NODATA">LOW</div></div>
-  </div>
+<body data-no-platform-shell="true">
+  <header class="appbar">
+    <div class="brandBlock"><div class="brand">EEI LANTERN</div><div class="sub">Launch Analysis and Network Telemetry Evaluation for RF Navigation | J2 Live Report v1.0.5</div></div>
+    <nav class="topnav" aria-label="LANTERN navigation">
+      <a href="/app?v=0115" class="primary">Home</a>
+      <a href="/lantern?v=0103">Flight Safety</a>
+      <a href="/static/mission_brief.html?v=091">Mission Brief</a>
+      <a href="/static/launch_analysis.html?v=075">Analyst</a>
+      <a href="/api/platform/deploy-check">System</a>
+      <span class="apiStatus"><span id="apiDot" class="dot check"></span><span id="apiText">API checking</span></span>
+    </nav>
+  </header>
 
-  <div class="card amber">
-    <h2>Executive J2 Summary</h2>
-    <div class="small" id="generated">Not loaded</div>
-    <ul id="kjs"></ul>
-    <p><b>Recommended action:</b> <span id="action">Load report.</span></p>
-  </div>
-
-  <div class="tabs">
-    <button class="tab active" data-tab="summary">J2 Summary</button>
-    <button class="tab" data-tab="gnssTab">GNSS/RF</button>
-    <button class="tab" data-tab="actorsTab">Threat Actors</button>
-    <button class="tab" data-tab="aviationTab">Aviation</button>
-    <button class="tab" data-tab="newsTab">News Feed</button>
-    <button class="tab" data-tab="sourcesTab">Source Log</button>
-    <button class="tab" data-tab="exportTab">Export</button>
-  </div>
-
-  <section id="summary" class="tab-panel active">
-    <div class="grid-2">
-      <div class="card">
-        <h2>Current judgement</h2>
-        <div id="summaryText" class="mono">No report loaded.</div>
+  <main class="wrap">
+    <section class="hero">
+      <div>
+        <h1 class="title">EEI LANTERN J2 Live Report</h1>
+        <div class="caption">GNSS / RF | Aviation | Threat actor awareness | State/security context | Source-traceable decision support</div>
       </div>
-      <div class="card warn">
-        <h2>Safety boundary</h2>
-        <p id="caveat">This is decision-support only. It does not authorise flight, certify GNSS performance, or provide tactical targeting intelligence.</p>
+      <div id="lastUpdated" class="last">Not loaded</div>
+    </section>
+
+    <section class="toolbar">
+      <button id="refreshBtn" class="btn primary">Refresh live OSINT</button>
+      <button id="cacheBtn" class="btn secondary">Load cached</button>
+      <button class="btn secondary" onclick="window.open('/api/j2/report.html','_blank')">Print / save PDF</button>
+      <button class="btn secondary" onclick="location.href='/app?v=0115'">LANTERN Home</button>
+      <label>AOI <input id="aoi" class="input" value="Aden Adde / Mogadishu" /></label>
+      <label>Collections <input id="collections" class="input" placeholder="e.g. 1,2,3" /></label>
+      <label class="check"><input type="checkbox" id="autoRefresh" /> Auto refresh 5 min</label>
+    </section>
+
+    <section class="cards" id="cards"></section>
+
+    <section class="summary">
+      <h2>Executive J2 Summary</h2>
+      <p id="headline" class="muted">Loading live OSINT...</p>
+      <p><b>Current judgement:</b> <span id="judgement">No report loaded.</span></p>
+      <p><b>Recommended action:</b> <span id="action">Load report.</span></p>
+      <div id="statusLine" class="statusLine"></div>
+    </section>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="summaryTab">J2 Summary</button>
+      <button class="tab" data-tab="gnssTab">GNSS/RF</button>
+      <button class="tab" data-tab="actorsTab">Threat Actors</button>
+      <button class="tab" data-tab="aviationTab">Aviation</button>
+      <button class="tab" data-tab="newsTab">News Feed</button>
+      <button class="tab" data-tab="sourceTab">Source Log</button>
+      <button class="tab" data-tab="exportTab">Export</button>
+    </nav>
+
+    <section class="grid tabPage" id="summaryTab">
+      <div class="panel"><h3>Current judgement</h3><div id="summaryList">No report loaded.</div></div>
+      <div class="panel safety"><h3>Safety boundary</h3><p>This is decision-support only. It does not authorise flight, certify GNSS performance, attribute RF/GNSS effects to a named actor without cited source support, or provide tactical targeting intelligence.</p></div>
+    </section>
+
+    <section class="grid tabPage hidden" id="gnssTab">
+      <div class="panel"><h3>GNSS / RF evidence</h3><div id="gnssList"></div></div>
+      <div class="panel"><h3>Local RF metrics</h3><div id="metricList"></div></div>
+    </section>
+
+    <section class="tabPage hidden" id="actorsTab">
+      <div class="grid">
+        <div class="panel"><h3>Threat actor handling</h3><div id="actorBrief"></div></div>
+        <div class="panel safety"><h3>Attribution boundary</h3><p>Do not attribute interference to Al-Shabaab, ISIS-Somalia, a state actor, or any other actor unless a cited source explicitly supports that attribution. Keep MOTH RF measurements separate from public-source attribution language.</p></div>
       </div>
-    </div>
-  </section>
+      <div class="panel accent"><h2>Structured J2 threat actor register</h2><div id="actorCards" class="actorGrid"></div></div>
+      <div class="panel"><h2>Actor-linked recent reporting and source hits</h2><div id="actorArticles" class="articleList"></div></div>
+    </section>
 
-  <section id="gnssTab" class="tab-panel">
-    <div class="grid-2">
-      <div class="card">
-        <h2>Local L1/L2/L5 RF assessment</h2>
-        <p id="gnssSummary" class="muted"></p>
-        <table><thead><tr><th>Band</th><th>Events</th><th>Max dBm</th></tr></thead><tbody id="gnssRows"></tbody></table>
+    <section class="grid tabPage hidden" id="aviationTab">
+      <div class="panel"><h3>Aviation and security context</h3><div id="aviationList"></div></div>
+      <div class="panel safety"><h3>Operational boundary</h3><p>Use official aeronautical information, local coordination, receiver serviceability checks, and the authorised safety case before any GPS-dependent task.</p></div>
+    </section>
+
+    <section class="tabPage hidden" id="newsTab">
+      <div class="panel"><h3>News feed</h3><div id="filterBar" class="filterBar"></div><div id="newsTable" class="articleList"></div></div>
+    </section>
+
+    <section class="tabPage hidden" id="sourceTab">
+      <div class="panel"><h3>Source log</h3><div id="sourceTable"></div></div>
+    </section>
+
+    <section class="tabPage hidden" id="exportTab">
+      <div class="grid">
+        <div class="panel"><h3>Export</h3><p><a class="btn primary" href="/api/j2/report.html" target="_blank">Open printable J2 report</a> <a class="btn secondary" href="/api/j2/export.csv">Download source CSV</a> <a class="btn secondary" href="/api/mission/report-jsp101.html" target="_blank">Open JSP 101 RF mission report</a></p><p class="small">Use the source CSV to preserve the OSINT source register with the briefing pack.</p></div>
+        <div class="panel"><h3>API endpoints</h3><ul class="clean"><li><code>/api/j2/news?live=true&amp;force=true</code></li><li><code>/api/j2/threat-actors?live=true&amp;force=true</code></li><li><code>/api/j2/report?live=true&amp;force=true</code></li><li><code>/api/j2/export.csv</code></li></ul></div>
       </div>
-      <div class="card">
-        <h2>Recent GNSS timeline buckets</h2>
-        <table><thead><tr><th>UTC bucket</th><th>L1</th><th>L2</th><th>L5</th><th>Total</th></tr></thead><tbody id="timelineRows"></tbody></table>
-      </div>
-    </div>
-  </section>
+    </section>
+  </main>
 
-  <section id="actorsTab" class="tab-panel">
-    <div class="card warn">
-      <h2>Public-source threat actor watch</h2>
-      <p class="muted" id="actorBoundary">Area-level public-source awareness only. No live locations, routes, targetable coordinates or tactical cues displayed.</p>
-      <table><thead><tr><th>Actor</th><th>Source mentions</th><th>Latest public report</th><th>Confidence</th><th>Operational relevance</th><th>Caveat</th></tr></thead><tbody id="actorRows"></tbody></table>
-    </div>
-  </section>
-
-  <section id="aviationTab" class="tab-panel">
-    <div class="card">
-      <h2>Aviation / airport operating environment</h2>
-      <p id="aviationSummary" class="muted"></p>
-      <div id="aviationChecks"></div>
-    </div>
-  </section>
-
-  <section id="newsTab" class="tab-panel">
-    <div class="card">
-      <h2>Latest OSINT leads</h2>
-      <p class="small">These are source leads, not verified intelligence judgements. Use source age, confidence and source reliability before briefing.</p>
-      <table><thead><tr><th>Source</th><th>Category</th><th>Title</th><th>Published / retrieved</th><th>Score</th></tr></thead><tbody id="newsRows"></tbody></table>
-    </div>
-  </section>
-
-  <section id="sourcesTab" class="tab-panel">
-    <div class="card">
-      <h2>Source log</h2>
-      <table><thead><tr><th>Source</th><th>Category</th><th>Reliability</th><th>Refresh</th><th>URL</th></tr></thead><tbody id="sourceRows"></tbody></table>
-    </div>
-  </section>
-
-  <section id="exportTab" class="tab-panel">
-    <div class="card">
-      <h2>Export</h2>
-      <p><a id="htmlExport" class="button" href="/api/j2/report.html" target="_blank">Open printable HTML report</a></p>
-      <p><button id="copyJson">Copy JSON snapshot</button></p>
-      <textarea id="jsonBox" style="width:100%;height:420px;background:#07111c;color:#eef4f8;border:1px solid var(--line);border-radius:8px;padding:10px;"></textarea>
-    </div>
-  </section>
-
-  <div class="footer">LANTERN J2 Live Report v1.0. Area-level OSINT only. GPS serviceability must be proven locally with equipment receiver validation.</div>
-</main>
+  <aside class="feed">
+    <div class="feedHead"><span class="feedTitle">LIVE OSINT ARTICLES</span><span class="feedBtns"><button id="miniRefresh">Refresh</button><button id="pauseBtn">Pause</button><button id="nextBtn">›</button></span></div>
+    <div class="feedBody" id="feedBody">Loading article feed...</div>
+    <div class="feedFoot" id="feedFoot">Feed loading</div>
+  </aside>
 
 <script>
-let lastData = null;
-let timer = null;
+const $ = id => document.getElementById(id);
+let lastReport = null;
+let threatPayload = null;
+let articles = [];
+let actorArticles = [];
+let articleIndex = 0;
+let paused = false;
+let activeFilter = 'All';
+let autoTimer = null;
 
-function clsForStatus(s) {
-  return String(s || 'NO DATA').replace(/\s+/g, '').toUpperCase();
+const fallbackActors = [
+  {
+    actor:'Al-Shabaab', type:'Primary non-state threat actor watch line', confidence:'source-register / live-source dependent',
+    j2_relevance:'Primary Mogadishu and south-central Somalia security threat line. Track attacks, airport-area security reporting, IED/indirect-fire/small-arms incidents, warnings, claims and local operating restrictions.',
+    current_assessment:'Treat as the priority actor watch line for Mogadishu/Aden Adde area awareness when source reporting is current. Do not infer RF/GNSS interference attribution from MOTH detections alone.',
+    aviation_rf_relevance:'Relevant to airport security posture, airspace risk, movement restrictions, route planning and conservative task approvals.'
+  },
+  {
+    actor:'ISIS-Somalia / Islamic State Somalia', type:'Secondary non-state threat actor watch line', confidence:'source-register / live-source dependent',
+    j2_relevance:'Track separately from Al-Shabaab. Usually handled as a Somalia security actor line; do not merge reporting unless a source explicitly links activity to the AOI.',
+    current_assessment:'Monitor for Somalia security context and any source-linked expansion or operational relevance. Do not assume local Mogadishu relevance without reporting support.',
+    aviation_rf_relevance:'Relevant as wider Somalia security context. Only elevate AOI relevance if current sources link the activity to Mogadishu, Aden Adde, aviation, airport access, or task route security.'
+  },
+  {
+    actor:'Somalia state / SCAA / airport / security-force context', type:'State and authorised security operating context', confidence:'official-source preferred',
+    j2_relevance:'Covers airport permissions, SCAA coordination, checkpoints, cordons, AUSSOM/security partner activity, NOTAM/eAIP constraints, and task-area restrictions.',
+    current_assessment:'Not a hostile actor bucket. Use to frame permissions, operating constraints, safety approvals and local coordination requirements.',
+    aviation_rf_relevance:'Directly relevant to airport-area permissions, communications, local movement, equipment deployment, and task go/no-go constraints.'
+  },
+  {
+    actor:'External state / regional actors', type:'Regional context watch line', confidence:'source-linked only',
+    j2_relevance:'Use only when official or reputable sources link external state/regional activity to the AOI, aviation risk, GNSS/RF interference, or operating constraints.',
+    current_assessment:'No unsupported hostile-state attribution. Keep this as a watch bucket unless source reporting makes a clear relevance claim.',
+    aviation_rf_relevance:'Relevant only where it changes airspace, airport, communications, GNSS, security, or diplomatic operating context.'
+  },
+  {
+    actor:'Unknown RF/GNSS interference source', type:'Unattributed technical anomaly bucket', confidence:'local measurement only until sourced',
+    j2_relevance:'Strong or recurrent L1/L2/L5 RF activity belongs here unless a cited source explicitly attributes cause or actor.',
+    current_assessment:'MOTH can show frequency, strength, time and place of observed RF activity; it cannot by itself identify a threat actor.',
+    aviation_rf_relevance:'Relevant to equipment serviceability and safety checks. Requires receiver health, independent GPS check, OSINT/official checks and local validation before operational conclusion.'
+  }
+];
+
+const fallbackBrief = [
+  'Maintain separate watch lines for Al-Shabaab, ISIS-Somalia, Somalia state/security context, external regional context, and unknown RF/GNSS sources.',
+  'Actor reporting is for J2 awareness and traceability. Local RF detections are measurement evidence, not attribution evidence.',
+  'Escalate an actor watch line only when a cited source links the actor, location, timing and operational relevance to the AOI.',
+  'Use official aviation/security sources first where available, then reputable news and source-register links as supporting context.'
+];
+
+function esc(s){return String(s ?? '').replace(/[&<>'"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+function safeArray(x){return Array.isArray(x) ? x : [];}
+function words(s){return String(s||'').toLowerCase();}
+function qs(live=true, force=false){
+  const p = new URLSearchParams();
+  p.set('aoi', $('aoi').value || 'Aden Adde / Mogadishu');
+  const c = ($('collections').value || '').trim();
+  if(c) p.set('collection_ids', c);
+  p.set('live', live ? 'true' : 'false');
+  p.set('force', force ? 'true' : 'false');
+  p.set('limit','40');
+  return p.toString();
 }
-function setStatus(id, value) {
-  const el = document.getElementById(id);
-  el.textContent = value || 'NO DATA';
-  el.className = 'status-value ' + clsForStatus(value);
+async function getJson(url){
+  const r = await fetch(url, {cache:'no-store'});
+  if(!r.ok) throw new Error(`HTTP ${r.status} on ${url}`);
+  return await r.json();
 }
-function esc(s) {
-  return String(s ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+async function getJsonMaybe(url){
+  try { return await getJson(url); } catch(err) { return {__error:String(err.message||err)}; }
 }
-function row(cells) { return '<tr>' + cells.map(c => '<td>' + c + '</td>').join('') + '</tr>'; }
-
-async function loadReport(refresh=false) {
-  const aoi = document.getElementById('aoiName').value || 'Aden Adde / Mogadishu';
-  const collections = document.getElementById('collectionIds').value.trim();
-  const params = new URLSearchParams({refresh: refresh ? 'true' : 'false', aoi_name: aoi, news_limit: '60'});
-  if (collections) params.set('collection_ids', collections);
-  const url = '/api/j2/report?' + params.toString();
-  document.getElementById('generated').textContent = 'Loading ' + (refresh ? 'live OSINT' : 'cached report') + '...';
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  lastData = await res.json();
-  render(lastData);
+function cardClass(v){
+  const x=words(v);
+  if(x.includes('no data')) return 'nodata';
+  if(x.includes('elevated')||x.includes('red')||x.includes('high')) return 'elevated';
+  if(x.includes('check')||x.includes('watch')||x.includes('amber')||x.includes('medium')) return 'check';
+  if(x.includes('live')||x.includes('green')||x.includes('low observed')||x.includes('ok')) return 'good';
+  if(x.includes('source')) return 'source';
+  return '';
 }
-
-function render(data) {
-  setStatus('overall', data.overall_status);
-  setStatus('gnss', data.gnss_status);
-  setStatus('security', data.security_status);
-  setStatus('aviation', data.aviation_status);
-  setStatus('confidence', data.confidence);
-  document.getElementById('generated').textContent = `Generated UTC: ${data.generated_utc} | AOI: ${data.aoi?.name || ''}`;
-  document.getElementById('action').textContent = data.recommended_action || '';
-  document.getElementById('caveat').textContent = data.caveat || '';
-
-  document.getElementById('kjs').innerHTML = (data.key_judgements || []).map(k => `<li><b>${esc(k.id)}</b>: ${esc(k.text)} <span class="small">Confidence: ${esc(k.confidence)}</span></li>`).join('');
-  document.getElementById('summaryText').textContent = JSON.stringify({
-    overall_status: data.overall_status,
-    gnss_status: data.gnss_status,
-    security_status: data.security_status,
-    aviation_status: data.aviation_status,
-    confidence: data.confidence,
-    refresh_result: data.refresh_result
-  }, null, 2);
-
-  const gnss = data.gnss_rf || {};
-  document.getElementById('gnssSummary').textContent = gnss.summary || '';
-  const totals = gnss.event_totals || {};
-  const max = gnss.max_dbm || {};
-  document.getElementById('gnssRows').innerHTML = ['L1','L2','L5'].map(b => row([esc(b), esc(totals[b] ?? 0), esc(max[b] ?? 'n/a')])).join('');
-  document.getElementById('timelineRows').innerHTML = (gnss.points || []).slice(-30).reverse().map(p => row([
-    esc(p.bucket_start_utc), esc(p.L1_event_count ?? 0), esc(p.L2_event_count ?? 0), esc(p.L5_event_count ?? 0), esc(p.total_gnss_events ?? 0)
-  ])).join('') || row(['No timeline data','','','','']);
-
-  const sec = data.security || {};
-  document.getElementById('actorBoundary').textContent = sec.safety_boundary || '';
-  document.getElementById('actorRows').innerHTML = (sec.watchlist || []).map(a => row([
-    esc(a.actor_name), esc(a.source_mention_count), esc(a.latest_public_report_utc || 'n/a'), esc(a.confidence), esc(a.operational_relevance), esc(a.caveat)
-  ])).join('') || row(['No actor watch data','','','','','']);
-
-  const av = data.aviation || {};
-  document.getElementById('aviationSummary').textContent = av.summary || '';
-  document.getElementById('aviationChecks').innerHTML = '<h3>Required checks</h3><ul>' + (av.checks || []).map(x => `<li>${esc(x)}</li>`).join('') + '</ul>';
-
-  document.getElementById('newsRows').innerHTML = (data.news || []).map(i => row([
-    esc(i.source_name), esc(i.category), i.url ? `<a href="${esc(i.url)}" target="_blank" rel="noreferrer">${esc(i.title)}</a>` : esc(i.title), esc(i.published_utc || i.retrieved_utc || ''), esc(i.relevance_score)
-  ])).join('') || row(['No cached news. Use Refresh live OSINT.','','','','']);
-
-  document.getElementById('sourceRows').innerHTML = (data.source_log || []).map(s => row([
-    esc(s.source_name), esc(s.category), esc(s.reliability), esc(s.refresh_hint), s.url ? `<a href="${esc(s.url)}" target="_blank" rel="noreferrer">open</a>` : ''
-  ])).join('');
-
-  const exportParams = new URLSearchParams({aoi_name: data.aoi?.name || 'Aden Adde / Mogadishu'});
-  const collections = document.getElementById('collectionIds').value.trim();
-  if (collections) exportParams.set('collection_ids', collections);
-  document.getElementById('htmlExport').href = '/api/j2/report.html?' + exportParams.toString();
-  document.getElementById('jsonBox').value = JSON.stringify(data, null, 2);
+function defaultCards(report, threat){
+  const m = report?.metrics || {};
+  const n = report?.news || {};
+  const actorCount = safeArray(threat?.actors).length;
+  return [
+    {label:'Overall J2', value:report?.overall_j2 || report?.overall || 'CHECK', detail:report?.headline || 'Review live OSINT, local RF evidence and official checks.'},
+    {label:'GNSS/RF', value:report?.gnss_status || 'CHECK', detail:report?.current_judgement || 'Review L1/L2/L5 and receiver health evidence.'},
+    {label:'Security', value:actorCount ? 'WATCH' : 'CHECK', detail:`Structured actor watch lines loaded: ${actorCount || fallbackActors.length}.`},
+    {label:'Aviation', value:'CHECK', detail:'Confirm official aeronautical information, permissions, NOTAM/eAIP and local operating approvals.'},
+    {label:'Source feed', value:(n.live_count||0)>0 ? 'LIVE' : 'SOURCE REGISTER', detail:`Live articles: ${n.live_count||0}; total links: ${n.count||safeArray(report?.articles).length||0}.`},
+    {label:'Confidence', value:report?.confidence || 'MEDIUM', detail:report?.confidence_detail || `Source items: ${n.count||0}; local RF rows: ${m.local_valid_rf_rows ?? 'n/a'}.`}
+  ];
 }
-
-document.querySelectorAll('.tab').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById(btn.dataset.tab).classList.add('active');
+function renderCards(report, threat){
+  const cards = safeArray(report?.cards).length ? report.cards : defaultCards(report, threat);
+  $('cards').innerHTML = cards.map(c=>`<div class="card ${cardClass(c.value)}"><div class="label">${esc(c.label)}</div><div class="value">${esc(c.value)}</div><div class="detail">${esc(c.detail)}</div></div>`).join('');
+}
+function list(items){return `<ul class="clean">${safeArray(items).map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`;}
+function normaliseArticlesFromReport(report){
+  const out=[];
+  for(const a of safeArray(report?.articles)) out.push(a);
+  for(const a of safeArray(report?.news?.articles)) out.push(a);
+  for(const a of safeArray(report?.news?.source_log)) out.push(a);
+  const seen = new Set();
+  return out.filter(a=>{const key=(a.url||'')+'|'+(a.title||''); if(seen.has(key)) return false; seen.add(key); return true;});
+}
+function actorArticleFilter(items){
+  return safeArray(items).filter(a=>{
+    const t = words([a.title,a.summary,a.category,a.actor,a.source,a.query].join(' '));
+    return t.includes('shabaab') || t.includes('isis') || t.includes('islamic state') || t.includes('daesh') || t.includes('terror') || t.includes('security') || t.includes('somalia');
   });
-});
-
-document.getElementById('refreshBtn').addEventListener('click', () => loadReport(true).catch(e => alert(e.message)));
-document.getElementById('cachedBtn').addEventListener('click', () => loadReport(false).catch(e => alert(e.message)));
-document.getElementById('copyJson').addEventListener('click', async () => {
-  await navigator.clipboard.writeText(document.getElementById('jsonBox').value);
-});
-document.getElementById('autoRefresh').addEventListener('change', e => {
-  if (timer) clearInterval(timer);
-  timer = null;
-  if (e.target.checked) timer = setInterval(() => loadReport(true).catch(console.error), 5 * 60 * 1000);
-});
-
-loadReport(false).catch(e => {
-  document.getElementById('generated').textContent = 'Failed to load: ' + e.message;
-});
+}
+function normaliseThreat(raw, report){
+  const reportArticles = normaliseArticlesFromReport(report);
+  const actorItems = safeArray(raw?.articles).length ? raw.articles : actorArticleFilter(reportArticles);
+  const actors = safeArray(raw?.actors).length ? raw.actors : safeArray(raw?.actor_register).length ? raw.actor_register : fallbackActors;
+  return {
+    generated_utc: raw?.generated_utc || report?.generated_utc || null,
+    live_attempted: raw?.live_attempted || false,
+    live_count: raw?.live_count || actorItems.filter(a=>a.live).length,
+    message: raw?.message || (raw?.__error ? `Threat endpoint unavailable; showing local structured fallback. ${raw.__error}` : 'Structured J2 actor register loaded.'),
+    brief_lines: safeArray(raw?.brief_lines).length ? raw.brief_lines : safeArray(raw?.handling_lines).length ? raw.handling_lines : fallbackBrief,
+    actors,
+    articles: actorItems,
+    source_log: safeArray(raw?.source_log)
+  };
+}
+function bandRows(report){
+  const bands = report?.metrics?.gnss_bands;
+  if(Array.isArray(bands) && bands.length){
+    return bands.map(b=>`<tr><td>${esc(b.band || b.name)}</td><td>${esc(b.event_count)}</td><td>${esc(b.strong_spike_count ?? b.strong_count)}</td><td>${esc(b.max_dbm)}</td><td>${esc(b.avg_dbm)}</td></tr>`).join('');
+  }
+  const freq = report?.metrics?.frequency_summary || {};
+  return Object.entries(freq).map(([k,v])=>`<tr><td>${esc(k)}</td><td>${esc(v.event_count)}</td><td>${esc(v.strong_count ?? v.strong_spike_count)}</td><td>${esc(v.max_dbm)}</td><td>${esc(v.avg_dbm)}</td></tr>`).join('');
+}
+function articleHtml(a){
+  const url = a.url || '#';
+  const title = a.title || a.source || 'Source item';
+  const cat = a.category ? `<span class="pill">${esc(a.category)}</span>` : '';
+  const actor = a.actor ? `<span class="pill actor">${esc(a.actor)}</span>` : '';
+  const live = a.live ? `<span class="pill live">LIVE</span>` : `<span class="pill">SOURCE REGISTER</span>`;
+  return `<article class="article"><div class="articleTitle"><a href="${esc(url)}" target="_blank" rel="noreferrer noopener">${esc(title)}</a></div><div class="articleMeta">${esc(a.source||'Source')} | ${esc(a.published_utc||'no date')} ${cat} ${actor} ${live}</div><div class="articleSummary">${esc(a.summary||a.query||'')}</div></article>`;
+}
+function renderReport(report, threat){
+  lastReport = report; threatPayload = normaliseThreat(threat, report);
+  articles = normaliseArticlesFromReport(report);
+  actorArticles = threatPayload.articles;
+  renderCards(report, threatPayload);
+  $('lastUpdated').textContent = `Generated UTC: ${report?.generated_utc || 'not loaded'} | J2 UI v1.0.5`;
+  $('headline').textContent = report?.headline || 'No headline returned.';
+  $('judgement').textContent = report?.current_judgement || 'No judgement returned.';
+  $('action').textContent = report?.recommended_action || 'No action returned.';
+  $('statusLine').innerHTML = `<span class="okText">Report loaded.</span> ${esc(report?.news?.message || '')} ${threatPayload.message ? ' | ' + esc(threatPayload.message) : ''}`;
+  $('summaryList').innerHTML = list(report?.sections?.j2_summary || []);
+  $('gnssList').innerHTML = list(report?.sections?.gnss_rf || []);
+  $('metricList').innerHTML = `<table><thead><tr><th>Band / bucket</th><th>Events</th><th>Strong ≥ -60 dBm</th><th>Max dBm</th><th>Avg dBm</th></tr></thead><tbody>${bandRows(report) || '<tr><td colspan="5">No local RF band metrics returned.</td></tr>'}</tbody></table>`;
+  $('aviationList').innerHTML = list(report?.sections?.aviation || []);
+  renderThreatActors(threatPayload);
+  renderNews();
+  renderSources(report, threatPayload);
+  renderFeed();
+}
+function renderThreatActors(t){
+  $('actorBrief').innerHTML = list(t.brief_lines || fallbackBrief);
+  $('actorCards').innerHTML = safeArray(t.actors).map(a=>`<div class="actorCard"><div class="actorTitle">${esc(a.actor||a.name||a.title)}</div><div class="actorType">${esc(a.type||a.category||'Watch line')}</div><p><b>J2 relevance:</b> ${esc(a.j2_relevance||a.relevance||a.summary)}</p><p><b>Current watch:</b> ${esc(a.current_assessment||a.assessment||a.current_watch)}</p><p><b>Aviation/RF relevance:</b> ${esc(a.aviation_rf_relevance||a.aviation_relevance||a.rf_relevance)}</p><span class="pill actor">${esc(a.confidence||'source-dependent')}</span></div>`).join('') || '<p class="muted">No actor register returned.</p>';
+  $('actorArticles').innerHTML = safeArray(t.articles).length ? t.articles.map(articleHtml).join('') : '<p class="muted">No actor-linked source items returned. Use source-register links and refresh with internet access.</p>';
+}
+function categories(){
+  const set = new Set(['All']);
+  for(const a of articles){ set.add(a.category || 'Uncategorised'); }
+  return Array.from(set);
+}
+function renderFilters(){
+  $('filterBar').innerHTML = categories().map(c=>`<button class="btn ${activeFilter===c?'primary':'ghost'}" data-filter="${esc(c)}">${esc(c)}</button>`).join(' ');
+  $('filterBar').querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{activeFilter=b.dataset.filter; renderNews();}));
+}
+function renderNews(){
+  renderFilters();
+  const items = activeFilter === 'All' ? articles : articles.filter(a=>(a.category||'Uncategorised')===activeFilter);
+  $('newsTable').innerHTML = items.length ? items.map(articleHtml).join('') : '<p class="muted">No articles/source items for this filter.</p>';
+}
+function renderSources(report, threat){
+  const rows = [...safeArray(report?.news?.source_log), ...safeArray(threat?.source_log)];
+  const tableRows = rows.map(a=>`<tr><td>${esc(a.source)}</td><td>${esc(a.category)}</td><td>${esc(a.actor||'')}</td><td>${esc(a.confidence)}</td><td><a href="${esc(a.url||'#')}" target="_blank" rel="noreferrer noopener">${esc(a.title||'open')}</a></td></tr>`).join('');
+  $('sourceTable').innerHTML = `<table><thead><tr><th>Source</th><th>Category</th><th>Actor</th><th>Confidence</th><th>Title / link</th></tr></thead><tbody>${tableRows || '<tr><td colspan="5">No sources loaded.</td></tr>'}</tbody></table>`;
+}
+function feedItems(){
+  const out = actorArticles.length ? actorArticles.concat(articles) : articles;
+  const seen = new Set();
+  return out.filter(a=>{const key=(a.url||'')+'|'+(a.title||''); if(seen.has(key)) return false; seen.add(key); return true;}).slice(0,40);
+}
+function renderFeed(){
+  const items = feedItems();
+  if(!items.length){$('feedBody').innerHTML='No article/source items loaded.'; $('feedFoot').textContent='Feed empty'; return;}
+  if(articleIndex >= items.length) articleIndex = 0;
+  const a = items[articleIndex];
+  $('feedBody').innerHTML = articleHtml(a);
+  $('feedFoot').textContent = `Item ${articleIndex+1}/${items.length} • live ${items.filter(x=>x.live).length} item(s)`;
+}
+function setApi(ok, text){
+  $('apiDot').className = 'dot ' + (ok ? 'ok' : 'bad');
+  $('apiText').textContent = text || (ok ? 'API online' : 'API error');
+}
+async function refreshReport(live=true, force=false){
+  try{
+    $('refreshBtn').disabled = true; $('cacheBtn').disabled = true; $('statusLine').textContent='Loading J2 report...';
+    const query = qs(live, force);
+    const report = await getJson(`/api/j2/report?${query}`);
+    const threat = await getJsonMaybe(`/api/j2/threat-actors?${query}`);
+    renderReport(report, threat);
+    setApi(true,'API online');
+  }catch(e){
+    $('statusLine').innerHTML = `<span class="error">${esc(e.message || e)}</span>`;
+    setApi(false,'API error');
+  }finally{$('refreshBtn').disabled=false; $('cacheBtn').disabled=false;}
+}
+async function loadCache(){
+  try{
+    const report = await getJson('/api/j2/cache');
+    const threat = await getJsonMaybe('/api/j2/threat-actors?live=false&force=false');
+    renderReport(report, threat);
+    setApi(true,'API online');
+  }catch(e){$('statusLine').innerHTML = `<span class="error">${esc(e.message)}</span>`; setApi(false,'API error');}
+}
+async function refreshNewsOnly(){
+  try{
+    const data = await getJson(`/api/j2/news?${qs(true,true)}`);
+    articles = safeArray(data.articles || data.source_log);
+    activeFilter='All';
+    renderNews();
+    articleIndex=0;
+    renderFeed();
+    $('feedFoot').textContent = data.message || 'Feed refreshed';
+  }catch(e){$('feedBody').textContent = e.message; $('feedFoot').textContent='Feed check failed; using cache if available';}
+}
+function setTab(id){
+  document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active', b.dataset.tab===id));
+  document.querySelectorAll('.tabPage').forEach(p=>p.classList.toggle('hidden', p.id!==id));
+}
+function nextFeed(){ const items=feedItems(); if(!items.length)return; articleIndex=(articleIndex+1)%items.length; renderFeed(); }
+function setup(){
+  document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>setTab(b.dataset.tab)));
+  $('refreshBtn').addEventListener('click',()=>refreshReport(true,true));
+  $('cacheBtn').addEventListener('click',loadCache);
+  $('miniRefresh').addEventListener('click',refreshNewsOnly);
+  $('nextBtn').addEventListener('click',nextFeed);
+  $('pauseBtn').addEventListener('click',()=>{paused=!paused; $('pauseBtn').textContent=paused?'Resume':'Pause';});
+  $('autoRefresh').addEventListener('change',()=>{if(autoTimer) clearInterval(autoTimer); autoTimer=null; if($('autoRefresh').checked){autoTimer=setInterval(()=>refreshReport(true,true), 5*60*1000);}});
+  setInterval(()=>{if(!paused) nextFeed();}, 12000);
+  getJson('/api/j2/health').then(()=>setApi(true,'API online')).catch(()=>setApi(false,'API offline'));
+  refreshReport(true,false);
+}
+setup();
 </script>
 </body>
 </html>
-

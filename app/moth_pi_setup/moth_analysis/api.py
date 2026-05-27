@@ -3424,4 +3424,2292 @@ def mission_jsp101_report_html(
 """
     return _v092_HTMLResponse(html)
 
+# ---- EEI LANTERN v0.10.0 Flight Safety / GNSS Clearance layer ----
+# Additive endpoints: standalone briefing page, constellation-aware GNSS L-band
+# clearance scoring, RF-burden GeoJSON, and simple report hooks.
 
+from datetime import datetime as _lantern_datetime, timezone as _lantern_timezone
+from typing import Any as _LanternAny
+from collections import defaultdict as _lantern_defaultdict
+import math as _lantern_math
+
+from fastapi import Query as _LanternQuery
+from fastapi.responses import HTMLResponse as _LanternHTMLResponse
+
+_LANTERN_VERSION = "0.10.0"
+
+_LANTERN_STYLE_NOTE = (
+    "RF burden layer colour logic: green = quieter/clearer observed, "
+    "yellow/amber = validate, orange = busy/caution, red = avoid if possible. "
+    "This is intentionally the reverse of a heat/intensity map."
+)
+
+# Constellation-aware catalogue used for ranking and display.
+# Ranges are practical planning/display windows in MHz, not a certification of receiver masks.
+_LANTERN_GNSS_BANDS: list[dict[str, _LanternAny]] = [
+    {"id": "gps_l5", "constellation": "GPS", "signal": "L5", "center_mhz": 1176.45, "min_mhz": 1164.0, "max_mhz": 1189.0, "family": "GPS", "layer": "lower"},
+    {"id": "galileo_e5a", "constellation": "Galileo", "signal": "E5a", "center_mhz": 1176.45, "min_mhz": 1164.0, "max_mhz": 1189.0, "family": "Galileo", "layer": "lower"},
+    {"id": "galileo_e5b", "constellation": "Galileo", "signal": "E5b", "center_mhz": 1207.14, "min_mhz": 1189.0, "max_mhz": 1214.0, "family": "Galileo", "layer": "lower"},
+    {"id": "beidou_b2", "constellation": "BeiDou", "signal": "B2", "center_mhz": 1207.14, "min_mhz": 1189.0, "max_mhz": 1214.0, "family": "BeiDou", "layer": "lower"},
+    {"id": "glonass_g3", "constellation": "GLONASS", "signal": "G3", "center_mhz": 1202.025, "min_mhz": 1198.0, "max_mhz": 1215.0, "family": "GLONASS", "layer": "lower"},
+    {"id": "gps_l2", "constellation": "GPS", "signal": "L2", "center_mhz": 1227.60, "min_mhz": 1215.0, "max_mhz": 1240.0, "family": "GPS", "layer": "lower"},
+    {"id": "glonass_g2", "constellation": "GLONASS", "signal": "G2", "center_mhz": 1246.0, "min_mhz": 1237.0, "max_mhz": 1254.0, "family": "GLONASS", "layer": "lower"},
+    {"id": "galileo_e6", "constellation": "Galileo", "signal": "E6", "center_mhz": 1278.75, "min_mhz": 1260.0, "max_mhz": 1300.0, "family": "Galileo", "layer": "lower"},
+    {"id": "beidou_b3", "constellation": "BeiDou", "signal": "B3", "center_mhz": 1268.52, "min_mhz": 1260.0, "max_mhz": 1300.0, "family": "BeiDou", "layer": "lower"},
+    {"id": "galileo_sar", "constellation": "Galileo", "signal": "SAR", "center_mhz": 1544.5, "min_mhz": 1544.0, "max_mhz": 1545.0, "family": "Galileo SAR", "layer": "upper"},
+    {"id": "beidou_b1", "constellation": "BeiDou", "signal": "B1", "center_mhz": 1561.098, "min_mhz": 1559.0, "max_mhz": 1563.0, "family": "BeiDou", "layer": "upper"},
+    {"id": "gps_l1", "constellation": "GPS", "signal": "L1", "center_mhz": 1575.42, "min_mhz": 1563.0, "max_mhz": 1587.0, "family": "GPS", "layer": "upper"},
+    {"id": "galileo_e1", "constellation": "Galileo", "signal": "E1", "center_mhz": 1575.42, "min_mhz": 1559.0, "max_mhz": 1591.0, "family": "Galileo", "layer": "upper"},
+    {"id": "beidou_b1_2", "constellation": "BeiDou", "signal": "B1-2", "center_mhz": 1589.742, "min_mhz": 1587.0, "max_mhz": 1591.0, "family": "BeiDou", "layer": "upper"},
+    {"id": "glonass_g1", "constellation": "GLONASS", "signal": "G1", "center_mhz": 1602.0, "min_mhz": 1593.0, "max_mhz": 1610.0, "family": "GLONASS", "layer": "upper"},
+]
+
+_LANTERN_SERVICE_BLOCKS: list[dict[str, _LanternAny]] = [
+    {"id": "lower_arns", "label": "ARNS", "min_mhz": 1164.0, "max_mhz": 1214.0, "layer": "lower", "meaning": "Aviation Radio Navigation Service"},
+    {"id": "lower_rnss_1", "label": "RNSS", "min_mhz": 1164.0, "max_mhz": 1215.0, "layer": "lower", "meaning": "Radio Navigation Satellite Service"},
+    {"id": "lower_rnss_2", "label": "RNSS", "min_mhz": 1215.0, "max_mhz": 1260.0, "layer": "lower", "meaning": "Radio Navigation Satellite Service"},
+    {"id": "lower_rnss_3", "label": "RNSS", "min_mhz": 1260.0, "max_mhz": 1300.0, "layer": "lower", "meaning": "Radio Navigation Satellite Service"},
+    {"id": "sar", "label": "SAR", "min_mhz": 1544.0, "max_mhz": 1545.0, "layer": "upper", "meaning": "Search and Rescue downlink area"},
+    {"id": "upper_arns", "label": "ARNS", "min_mhz": 1559.0, "max_mhz": 1610.0, "layer": "upper", "meaning": "Aviation Radio Navigation Service"},
+    {"id": "upper_rnss", "label": "RNSS", "min_mhz": 1559.0, "max_mhz": 1610.0, "layer": "upper", "meaning": "Radio Navigation Satellite Service"},
+]
+
+
+def _lantern_iso(dt: _lantern_datetime | None) -> str | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_lantern_timezone.utc)
+    return dt.astimezone(_lantern_timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _lantern_parse_dt(value: _LanternAny) -> _lantern_datetime | None:
+    if not value:
+        return None
+    try:
+        text = str(value).strip().replace("Z", "+00:00")
+        dt = _lantern_datetime.fromisoformat(text)
+        return dt.astimezone(_lantern_timezone.utc) if dt.tzinfo else dt.replace(tzinfo=_lantern_timezone.utc)
+    except Exception:
+        return None
+
+
+def _lantern_clamp(value: float, lo: float = 0.0, hi: float = 1.0) -> float:
+    try:
+        return max(lo, min(hi, float(value)))
+    except Exception:
+        return lo
+
+
+def _lantern_parse_ids(collection_id=None, collection_ids=None) -> list[int]:
+    try:
+        return parse_collection_ids(collection_id=collection_id, collection_ids=collection_ids)  # type: ignore[name-defined]
+    except Exception:
+        ids: set[int] = set()
+        if collection_id not in (None, ""):
+            ids.add(int(collection_id))
+        if collection_ids:
+            for part in str(collection_ids).replace(";", ",").split(","):
+                part = part.strip()
+                if part:
+                    ids.add(int(part))
+        return sorted(ids)
+
+
+def _lantern_band_label(band: dict[str, _LanternAny]) -> str:
+    return f"{band.get('constellation')} {band.get('signal')}".strip()
+
+
+def _lantern_query_lband_events(
+    *,
+    collection_id=None,
+    collection_ids=None,
+    start_utc=None,
+    end_utc=None,
+    min_mhz: float = 1100.0,
+    max_mhz: float = 1650.0,
+    min_dbm=None,
+    max_rows: int = 500000,
+) -> tuple[list[dict[str, _LanternAny]], list[int]]:
+    ids = _lantern_parse_ids(collection_id=collection_id, collection_ids=collection_ids)
+    where = ["valid = 1", "frequency_hz IS NOT NULL", "strength_dbm IS NOT NULL"]
+    params: list[_LanternAny] = []
+    if ids:
+        placeholders = ",".join("?" for _ in ids)
+        where.append(f"collection_id IN ({placeholders})")
+        params.extend(ids)
+    where.append("frequency_hz >= ?")
+    params.append(float(min_mhz) * 1_000_000.0)
+    where.append("frequency_hz <= ?")
+    params.append(float(max_mhz) * 1_000_000.0)
+    if start_utc:
+        where.append("timestamp_utc >= ?")
+        params.append(str(start_utc))
+    if end_utc:
+        where.append("timestamp_utc <= ?")
+        params.append(str(end_utc))
+    if min_dbm is not None:
+        where.append("strength_dbm >= ?")
+        params.append(float(min_dbm))
+    params.append(int(max_rows))
+    conn = connect()  # type: ignore[name-defined]
+    try:
+        rows = rows_to_dicts(conn.execute(  # type: ignore[name-defined]
+            "SELECT event_id, collection_id, timestamp_utc, frequency_hz, strength_dbm, lat, lon, h3_r8, h3_r9, h3_r10 "
+            "FROM moth_events WHERE " + " AND ".join(where) + " ORDER BY timestamp_utc ASC LIMIT ?",
+            params,
+        ).fetchall())
+    finally:
+        conn.close()
+    return rows, ids
+
+
+def _lantern_strength_quality(max_dbm: float | None) -> float:
+    # -110 dBm and below = weak contribution to burden; -55 dBm and stronger = high burden.
+    if max_dbm is None:
+        return 0.0
+    return _lantern_clamp((float(max_dbm) + 110.0) / 55.0)
+
+
+def _lantern_burden_score(event_count: int, spike_count: int, max_dbm: float | None, max_event_count: int, max_spike_count: int) -> float:
+    count_q = _lantern_clamp(float(event_count) / max(float(max_event_count or 1), 1.0))
+    spike_q = _lantern_clamp(float(spike_count) / max(float(max_spike_count or 1), 1.0)) if max_spike_count else 0.0
+    strength_q = _lantern_strength_quality(max_dbm)
+    score = 100.0 * (0.45 * count_q + 0.35 * spike_q + 0.20 * strength_q)
+    return round(_lantern_clamp(score, 0.0, 100.0), 1)
+
+
+def _lantern_clearance_status(clearance_score: float, event_count: int, total_lband_events: int) -> str:
+    if total_lband_events <= 0:
+        return "NO DATA"
+    if event_count <= 0:
+        return "QUIET BY MOTH - VERIFY"
+    if clearance_score >= 80.0:
+        return "LOW RF BURDEN"
+    if clearance_score >= 60.0:
+        return "CHECK"
+    if clearance_score >= 40.0:
+        return "BUSY"
+    return "AVOID IF POSSIBLE"
+
+
+def _lantern_display_colour(clearance_score: float, event_count: int, total_lband_events: int) -> str:
+    if total_lband_events <= 0:
+        return "#808080"  # no data
+    if clearance_score >= 80.0:
+        return "#1f7a3a"  # green = clear/quiet observed
+    if clearance_score >= 60.0:
+        return "#d4a017"  # amber = validate
+    if clearance_score >= 40.0:
+        return "#d46a1f"  # orange = busy
+    return "#b42318"      # red = avoid
+
+
+def _lantern_overlap_band_labels(min_mhz: float, max_mhz: float) -> list[str]:
+    overlaps: list[str] = []
+    for band in _LANTERN_GNSS_BANDS:
+        if float(band["max_mhz"]) >= float(min_mhz) and float(band["min_mhz"]) <= float(max_mhz):
+            overlaps.append(_lantern_band_label(band))
+    return overlaps
+
+
+def _lantern_confidence(total_events: int, collection_count: int, first_dt: _lantern_datetime | None, last_dt: _lantern_datetime | None) -> dict[str, _LanternAny]:
+    duration_hours = None
+    if first_dt and last_dt and last_dt >= first_dt:
+        duration_hours = round((last_dt - first_dt).total_seconds() / 3600.0, 2)
+    score = 0.0
+    reasons: list[str] = []
+    if total_events <= 0:
+        reasons.append("No L-band events matched the current filter.")
+    else:
+        score += min(45.0, total_events / 10.0)
+        if total_events >= 500:
+            reasons.append("High L-band evidence volume under the current filters.")
+        elif total_events >= 50:
+            reasons.append("Moderate L-band evidence volume under the current filters.")
+        else:
+            reasons.append("Sparse L-band evidence under the current filters.")
+    if collection_count >= 3:
+        score += 35.0
+        reasons.append("Multiple scans contribute to this view.")
+    elif collection_count == 2:
+        score += 25.0
+        reasons.append("Two scans contribute to this view.")
+    elif collection_count == 1:
+        score += 10.0
+        reasons.append("Only one scan contributes to this view.")
+    if duration_hours is not None:
+        if duration_hours >= 6:
+            score += 20.0
+            reasons.append("The selected data spans several hours.")
+        elif duration_hours >= 1:
+            score += 12.0
+            reasons.append("The selected data spans at least one hour.")
+        else:
+            score += 5.0
+            reasons.append("The selected data is a short time slice.")
+    score = round(_lantern_clamp(score, 0.0, 100.0), 1)
+    label = "HIGH" if score >= 75 else "MEDIUM" if score >= 45 else "LOW"
+    return {"score_0_100": score, "label": label, "reasons": reasons, "duration_hours": duration_hours}
+
+
+def _lantern_build_clearance_payload(
+    *,
+    collection_id=None,
+    collection_ids=None,
+    start_utc=None,
+    end_utc=None,
+    freq_min_mhz: float = 1100.0,
+    freq_max_mhz: float = 1650.0,
+    freq_bin_mhz: float = 2.0,
+    spike_dbm: float = -60.0,
+    min_dbm=None,
+    max_rows: int = 500000,
+) -> dict[str, _LanternAny]:
+    rows, ids = _lantern_query_lband_events(
+        collection_id=collection_id,
+        collection_ids=collection_ids,
+        start_utc=start_utc,
+        end_utc=end_utc,
+        min_mhz=freq_min_mhz,
+        max_mhz=freq_max_mhz,
+        min_dbm=min_dbm,
+        max_rows=max_rows,
+    )
+    bin_width = max(0.5, float(freq_bin_mhz))
+    span = max(0.5, float(freq_max_mhz) - float(freq_min_mhz))
+    bin_count = max(1, int(_lantern_math.ceil(span / bin_width)))
+    bins: list[dict[str, _LanternAny]] = []
+    for i in range(bin_count):
+        lo = float(freq_min_mhz) + i * bin_width
+        hi = min(float(freq_max_mhz), lo + bin_width)
+        bins.append({
+            "freq_bin_mhz": round(lo, 3),
+            "freq_center_mhz": round((lo + hi) / 2.0, 3),
+            "freq_min_mhz": round(lo, 3),
+            "freq_max_mhz": round(hi, 3),
+            "event_count": 0,
+            "strengths": [],
+            "spike_count": 0,
+        })
+
+    band_work: dict[str, dict[str, _LanternAny]] = {
+        str(b["id"]): {"band": b, "event_count": 0, "strengths": [], "spike_count": 0} for b in _LANTERN_GNSS_BANDS
+    }
+
+    first_dt = None
+    last_dt = None
+    collection_set: set[int] = set()
+    for row in rows:
+        try:
+            f_mhz = float(row.get("frequency_hz")) / 1_000_000.0
+            strength = float(row.get("strength_dbm"))
+        except Exception:
+            continue
+        dt = _lantern_parse_dt(row.get("timestamp_utc"))
+        if dt:
+            first_dt = dt if first_dt is None or dt < first_dt else first_dt
+            last_dt = dt if last_dt is None or dt > last_dt else last_dt
+        if row.get("collection_id") is not None:
+            try:
+                collection_set.add(int(row.get("collection_id")))
+            except Exception:
+                pass
+        idx = int(_lantern_math.floor((f_mhz - float(freq_min_mhz)) / bin_width))
+        if 0 <= idx < len(bins):
+            bins[idx]["event_count"] += 1
+            bins[idx]["strengths"].append(strength)
+            if strength >= float(spike_dbm):
+                bins[idx]["spike_count"] += 1
+        for band in _LANTERN_GNSS_BANDS:
+            if float(band["min_mhz"]) <= f_mhz <= float(band["max_mhz"]):
+                work = band_work[str(band["id"])]
+                work["event_count"] += 1
+                work["strengths"].append(strength)
+                if strength >= float(spike_dbm):
+                    work["spike_count"] += 1
+
+    max_bin_count = max((int(b["event_count"]) for b in bins), default=1) or 1
+    max_bin_spikes = max((int(b["spike_count"]) for b in bins), default=0)
+    frequency_bins: list[dict[str, _LanternAny]] = []
+    for b in bins:
+        vals = [float(v) for v in b.pop("strengths", [])]
+        max_dbm = round(max(vals), 1) if vals else None
+        avg_dbm = round(sum(vals) / len(vals), 1) if vals else None
+        min_strength = round(min(vals), 1) if vals else None
+        burden = _lantern_burden_score(int(b["event_count"]), int(b["spike_count"]), max_dbm, max_bin_count, max_bin_spikes)
+        clearance = round(100.0 - burden, 1)
+        item = dict(b)
+        item.update({
+            "avg_dbm": avg_dbm,
+            "min_dbm": min_strength,
+            "max_dbm": max_dbm,
+            "rf_burden_score": burden,
+            "clearance_score": clearance,
+            "display_color": _lantern_display_colour(clearance, int(b["event_count"]), len(rows)),
+            "overlaps": _lantern_overlap_band_labels(float(b["freq_min_mhz"]), float(b["freq_max_mhz"])),
+        })
+        frequency_bins.append(item)
+
+    max_band_count = max((int(w["event_count"]) for w in band_work.values()), default=1) or 1
+    max_band_spikes = max((int(w["spike_count"]) for w in band_work.values()), default=0)
+    band_scores: list[dict[str, _LanternAny]] = []
+    for work in band_work.values():
+        band = dict(work["band"])
+        vals = [float(v) for v in work.get("strengths", [])]
+        event_count = int(work.get("event_count") or 0)
+        spike_count = int(work.get("spike_count") or 0)
+        max_dbm = round(max(vals), 1) if vals else None
+        avg_dbm = round(sum(vals) / len(vals), 1) if vals else None
+        min_strength = round(min(vals), 1) if vals else None
+        burden = _lantern_burden_score(event_count, spike_count, max_dbm, max_band_count, max_band_spikes)
+        clearance = round(100.0 - burden, 1)
+        band.update({
+            "label": _lantern_band_label(band),
+            "event_count": event_count,
+            "spike_count": spike_count,
+            "avg_dbm": avg_dbm,
+            "min_dbm": min_strength,
+            "max_dbm": max_dbm,
+            "rf_burden_score": burden,
+            "clearance_score": clearance,
+            "status": _lantern_clearance_status(clearance, event_count, len(rows)),
+            "display_color": _lantern_display_colour(clearance, event_count, len(rows)),
+            "plain_reason": (
+                "No MOTH detections in this band; verify with live receiver checks."
+                if event_count <= 0 and len(rows) > 0 else
+                f"{event_count} event(s), {spike_count} strong spike(s), max {max_dbm} dBm."
+                if event_count > 0 else
+                "No data available under the selected filters."
+            ),
+        })
+        band_scores.append(band)
+    band_scores.sort(key=lambda r: (float(r.get("clearance_score") or 0.0), -int(r.get("event_count") or 0), -int(r.get("spike_count") or 0)), reverse=True)
+    if band_scores and len(rows) > 0:
+        band_scores[0]["status"] = "QUIETEST OBSERVED" if int(band_scores[0].get("event_count") or 0) > 0 else "QUIETEST OBSERVED BY ABSENCE - VERIFY"
+
+    peaks = [b for b in frequency_bins if int(b.get("event_count") or 0) > 0]
+    peaks.sort(key=lambda x: (float(x.get("rf_burden_score") or 0.0), int(x.get("spike_count") or 0), float(x.get("max_dbm") or -999.0)), reverse=True)
+    peak_traffic = []
+    for p in peaks[:12]:
+        peak_traffic.append({
+            "freq_center_mhz": p.get("freq_center_mhz"),
+            "freq_range_mhz": [p.get("freq_min_mhz"), p.get("freq_max_mhz")],
+            "event_count": p.get("event_count"),
+            "spike_count": p.get("spike_count"),
+            "max_dbm": p.get("max_dbm"),
+            "rf_burden_score": p.get("rf_burden_score"),
+            "overlaps": p.get("overlaps") or [],
+        })
+
+    confidence = _lantern_confidence(len(rows), len(collection_set), first_dt, last_dt)
+    best = band_scores[0] if band_scores else None
+    if len(rows) <= 0:
+        readiness_status = "NO DATA"
+        readiness_reason = "No L-band detections matched the selected filters. Do not infer RF/GNSS serviceability."
+    elif confidence["label"] == "LOW":
+        readiness_status = "RF CHECK"
+        readiness_reason = "The clearest GNSS option is visible, but evidence confidence is low. Validate before use."
+    elif best and float(best.get("clearance_score") or 0) >= 80 and int(best.get("spike_count") or 0) == 0:
+        readiness_status = "RF SUPPORTS"
+        readiness_reason = "At least one GNSS band shows low observed RF burden under the selected filters."
+    elif best and float(best.get("clearance_score") or 0) >= 55:
+        readiness_status = "RF CHECK"
+        readiness_reason = "A usable-looking option exists, but RF burden or data confidence requires validation."
+    else:
+        readiness_status = "RF DOES NOT SUPPORT"
+        readiness_reason = "All ranked GNSS options are busy, spike-prone, or insufficiently supported."
+
+    return {
+        "version": _LANTERN_VERSION,
+        "generated_utc": _lantern_iso(_lantern_datetime.now(_lantern_timezone.utc)),
+        "selected_collection_ids": ids,
+        "selected_window_utc": [start_utc, end_utc],
+        "frequency_range_mhz": [float(freq_min_mhz), float(freq_max_mhz)],
+        "freq_bin_mhz": float(freq_bin_mhz),
+        "spike_dbm": float(spike_dbm),
+        "total_lband_events": len(rows),
+        "first_timestamp_utc": _lantern_iso(first_dt),
+        "last_timestamp_utc": _lantern_iso(last_dt),
+        "scan_count": len(collection_set),
+        "confidence": confidence,
+        "readiness": {
+            "status": readiness_status,
+            "reason": readiness_reason,
+            "best_gnss_option": best,
+            "plain_language": (
+                f"{readiness_status}: {best.get('label')} is the lowest observed RF-burden option."
+                if best else f"{readiness_status}: no GNSS option could be ranked."
+            ),
+        },
+        "gnss_bands": _LANTERN_GNSS_BANDS,
+        "service_blocks": _LANTERN_SERVICE_BLOCKS,
+        "frequency_bins": frequency_bins,
+        "band_scores": band_scores,
+        "peak_traffic": peak_traffic,
+        "colour_logic": _LANTERN_STYLE_NOTE,
+        "limitations": [
+            "MOTH data is event-based. No detection does not prove the band was empty.",
+            "Lowest observed RF burden does not prove GNSS receiver integrity or flight safety.",
+            "Use only with authorised operations, live receiver health checks, satellite count, HDOP/PDOP or OEM quality metrics, and link checks.",
+        ],
+        "still_required": [
+            "Equipment receiver fix status and stability check.",
+            "Satellite count by constellation where available.",
+            "HDOP/PDOP or OEM GNSS quality metric.",
+            "Independent receiver cross-check.",
+            "Command/control or telemetry link check.",
+            "Airspace, weather, aircraft, battery, crew, and local approval checks.",
+        ],
+    }
+
+
+@app.get("/lantern", response_class=_LanternHTMLResponse)
+def lantern_page() -> str:
+    page = STATIC_DIR / "lantern_flight_safety.html"  # type: ignore[name-defined]
+    if page.exists():
+        return page.read_text(encoding="utf-8")
+    return "<h1>EEI LANTERN</h1><p>lantern_flight_safety.html is not installed in the static folder.</p>"
+
+
+@app.get("/api/lantern/health")
+def lantern_health() -> dict[str, _LanternAny]:
+    return {
+        "status": "ok",
+        "lantern_version": _LANTERN_VERSION,
+        "page": "/lantern",
+        "static_page": "/static/lantern_flight_safety.html?v=010",
+        "clearance_endpoint": "/api/lantern/clearance-spectrum",
+        "rf_burden_geojson": "/api/lantern/rf-burden.geojson",
+    }
+
+
+@app.get("/api/lantern/gnss-bands")
+def lantern_gnss_bands() -> dict[str, _LanternAny]:
+    return {
+        "version": _LANTERN_VERSION,
+        "gnss_bands": _LANTERN_GNSS_BANDS,
+        "service_blocks": _LANTERN_SERVICE_BLOCKS,
+        "frequency_range_mhz": [1100.0, 1650.0],
+        "note": "Practical display catalogue for LANTERN GNSS L-band clearance view.",
+    }
+
+
+@app.get("/api/lantern/clearance-spectrum")
+def lantern_clearance_spectrum(
+    collection_id: int | None = None,
+    collection_ids: str | None = None,
+    start_utc: str | None = None,
+    end_utc: str | None = None,
+    freq_min_mhz: float = _LanternQuery(default=1100.0, ge=900.0, le=2000.0),
+    freq_max_mhz: float = _LanternQuery(default=1650.0, ge=900.0, le=2000.0),
+    freq_bin_mhz: float = _LanternQuery(default=2.0, ge=0.5, le=25.0),
+    spike_dbm: float = _LanternQuery(default=-60.0),
+    min_dbm: float | None = None,
+    max_rows: int = _LanternQuery(default=500000, ge=1000, le=2000000),
+) -> dict[str, _LanternAny]:
+    if float(freq_max_mhz) <= float(freq_min_mhz):
+        return {"version": _LANTERN_VERSION, "error": "freq_max_mhz must be greater than freq_min_mhz"}
+    return _lantern_build_clearance_payload(
+        collection_id=collection_id,
+        collection_ids=collection_ids,
+        start_utc=start_utc,
+        end_utc=end_utc,
+        freq_min_mhz=freq_min_mhz,
+        freq_max_mhz=freq_max_mhz,
+        freq_bin_mhz=freq_bin_mhz,
+        spike_dbm=spike_dbm,
+        min_dbm=min_dbm,
+        max_rows=max_rows,
+    )
+
+
+@app.get("/api/lantern/flight-brief")
+def lantern_flight_brief(
+    collection_id: int | None = None,
+    collection_ids: str | None = None,
+    start_utc: str | None = None,
+    end_utc: str | None = None,
+    duration_minutes: int = _LanternQuery(default=30, ge=5, le=240),
+    step_minutes: int = _LanternQuery(default=10, ge=1, le=120),
+    width_mhz: float = _LanternQuery(default=40.0, ge=1.0, le=100.0),
+    spike_dbm: float = _LanternQuery(default=-60.0),
+    max_rows: int = _LanternQuery(default=500000, ge=1000, le=2000000),
+) -> dict[str, _LanternAny]:
+    clearance = _lantern_build_clearance_payload(
+        collection_id=collection_id,
+        collection_ids=collection_ids,
+        start_utc=start_utc,
+        end_utc=end_utc,
+        freq_min_mhz=1100.0,
+        freq_max_mhz=1650.0,
+        freq_bin_mhz=2.0,
+        spike_dbm=spike_dbm,
+        max_rows=max_rows,
+    )
+    launch = None
+    launch_error = None
+    try:
+        launch_fn = globals().get("moth_advanced_launch_windows")
+        if launch_fn:
+            launch = launch_fn(
+                collection_id=collection_id,
+                collection_ids=collection_ids,
+                start_utc=start_utc,
+                end_utc=end_utc,
+                duration_minutes=duration_minutes,
+                step_minutes=step_minutes,
+                width_mhz=width_mhz,
+                spike_dbm=spike_dbm,
+                max_rows=max_rows,
+            )
+    except Exception as exc:
+        launch_error = str(exc)
+    best_launch = (launch.get("windows") or [None])[0] if isinstance(launch, dict) else None
+    return {
+        "version": _LANTERN_VERSION,
+        "generated_utc": clearance.get("generated_utc"),
+        "readiness": clearance.get("readiness"),
+        "confidence": clearance.get("confidence"),
+        "best_launch_window": best_launch,
+        "launch_window_source": "advanced_launch_windows" if best_launch else None,
+        "launch_error": launch_error,
+        "best_gnss_option": (clearance.get("band_scores") or [None])[0],
+        "constellation_ranking": (clearance.get("band_scores") or [])[:8],
+        "peak_traffic": clearance.get("peak_traffic") or [],
+        "limitations": clearance.get("limitations") or [],
+        "still_required": clearance.get("still_required") or [],
+    }
+
+
+@app.get("/api/lantern/rf-burden.geojson")
+def lantern_rf_burden_geojson(
+    resolution: int = _LanternQuery(default=11, ge=8, le=12),
+    collection_id: int | None = None,
+    collection_ids: str | None = None,
+    start_utc: str | None = None,
+    end_utc: str | None = None,
+    freq_min_mhz: float = _LanternQuery(default=1100.0, ge=900.0, le=2000.0),
+    freq_max_mhz: float = _LanternQuery(default=1650.0, ge=900.0, le=2000.0),
+    spike_dbm: float = _LanternQuery(default=-60.0),
+    min_dbm: float | None = None,
+    max_rows: int = _LanternQuery(default=500000, ge=1000, le=2000000),
+) -> dict[str, _LanternAny]:
+    rows, ids = _lantern_query_lband_events(
+        collection_id=collection_id,
+        collection_ids=collection_ids,
+        start_utc=start_utc,
+        end_utc=end_utc,
+        min_mhz=freq_min_mhz,
+        max_mhz=freq_max_mhz,
+        min_dbm=min_dbm,
+        max_rows=max_rows,
+    )
+    grouped: dict[str, dict[str, _LanternAny]] = {}
+    for row in rows:
+        try:
+            cell = h3_cell_for_event(row, resolution)  # type: ignore[name-defined]
+        except Exception:
+            try:
+                if row.get("lat") is None or row.get("lon") is None:
+                    continue
+                cell = latlon_to_cell(float(row["lat"]), float(row["lon"]), resolution)  # type: ignore[name-defined]
+            except Exception:
+                continue
+        if not cell:
+            continue
+        g = grouped.setdefault(str(cell), {"event_count": 0, "strengths": [], "spike_count": 0, "first_timestamp_utc": None, "last_timestamp_utc": None})
+        try:
+            strength = float(row.get("strength_dbm"))
+        except Exception:
+            continue
+        g["event_count"] += 1
+        g["strengths"].append(strength)
+        if strength >= float(spike_dbm):
+            g["spike_count"] += 1
+        ts = row.get("timestamp_utc")
+        if ts:
+            if g["first_timestamp_utc"] is None or str(ts) < str(g["first_timestamp_utc"]):
+                g["first_timestamp_utc"] = str(ts)
+            if g["last_timestamp_utc"] is None or str(ts) > str(g["last_timestamp_utc"]):
+                g["last_timestamp_utc"] = str(ts)
+
+    max_event_count = max((int(g["event_count"]) for g in grouped.values()), default=1) or 1
+    max_spike_count = max((int(g["spike_count"]) for g in grouped.values()), default=0)
+    features: list[dict[str, _LanternAny]] = []
+    for cell, g in grouped.items():
+        vals = [float(v) for v in g.get("strengths", [])]
+        max_dbm = round(max(vals), 1) if vals else None
+        avg_dbm = round(sum(vals) / len(vals), 1) if vals else None
+        burden = _lantern_burden_score(int(g["event_count"]), int(g["spike_count"]), max_dbm, max_event_count, max_spike_count)
+        clearance = round(100.0 - burden, 1)
+        try:
+            boundary = cell_to_boundary_lnglat(cell)  # type: ignore[name-defined]
+        except Exception:
+            boundary = None
+        if not boundary:
+            continue
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Polygon", "coordinates": [boundary]},
+            "properties": {
+                "h3_cell": cell,
+                "event_count": int(g["event_count"]),
+                "spike_count": int(g["spike_count"]),
+                "avg_dbm": avg_dbm,
+                "max_dbm": max_dbm,
+                "rf_burden_score": burden,
+                "clearance_score": clearance,
+                "interpretation": _lantern_clearance_status(clearance, int(g["event_count"]), len(rows)),
+                "display_color": _lantern_display_colour(clearance, int(g["event_count"]), len(rows)),
+                "first_timestamp_utc": g.get("first_timestamp_utc"),
+                "last_timestamp_utc": g.get("last_timestamp_utc"),
+                "colour_logic": _LANTERN_STYLE_NOTE,
+                "plain_meaning": "RF burden polygon: green is quieter/clearer observed; red is busy/noisy/spike-prone.",
+            },
+        })
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "version": _LANTERN_VERSION,
+        "selected_collection_ids": ids,
+        "colour_logic": _LANTERN_STYLE_NOTE,
+    }
+
+# ---- end EEI LANTERN v0.10.0 additions ----
+
+# ---- EEI LANTERN v0.10.3 signal interpretation reporting ----
+# Additive reporting endpoint. It explains strong dBm detections in operational
+# context without changing deterministic clearance scoring.
+
+from datetime import datetime as _lantern_v0103_datetime, timezone as _lantern_v0103_timezone
+import math as _lantern_v0103_math
+
+try:
+    _LANTERN_V0103_QUERY = _LanternQuery  # type: ignore[name-defined]
+except Exception:  # pragma: no cover - defensive for unusual patch order
+    from fastapi import Query as _LANTERN_V0103_QUERY
+
+_LANTERN_REPORTING_VERSION = "0.10.3"
+_LANTERN_REPORTING_REFERENCE_DBM = -130.0
+_LANTERN_REPORTING_REFERENCE_TEXT = (
+    "For plain-English reporting, LANTERN treats about -130 dBm as a practical "
+    "GNSS L1 received-power reference. A -60 dBm in-band detection is therefore "
+    "about 70 dB, or roughly 10,000,000 times by power, above that reference."
+)
+
+
+def _lantern_v0103_ratio_text(delta_db):
+    try:
+        ratio = 10 ** (float(delta_db) / 10.0)
+    except Exception:
+        return None
+    if ratio >= 1_000_000_000:
+        return f"{ratio / 1_000_000_000:.1f} billion times"
+    if ratio >= 1_000_000:
+        return f"{ratio / 1_000_000:.1f} million times"
+    if ratio >= 1_000:
+        return f"{ratio / 1_000:.1f} thousand times"
+    if ratio >= 10:
+        return f"{ratio:.0f} times"
+    if ratio >= 1:
+        return f"{ratio:.1f} times"
+    return f"{ratio:.3f} times"
+
+
+def _lantern_v0103_power_comparison(max_dbm, reference_dbm=_LANTERN_REPORTING_REFERENCE_DBM):
+    if max_dbm is None:
+        return {
+            "reference_dbm": reference_dbm,
+            "delta_db": None,
+            "power_ratio": None,
+            "plain": "No max dBm value is available for this item.",
+        }
+    try:
+        delta = round(float(max_dbm) - float(reference_dbm), 1)
+    except Exception:
+        return {
+            "reference_dbm": reference_dbm,
+            "delta_db": None,
+            "power_ratio": None,
+            "plain": "The max dBm value could not be interpreted numerically.",
+        }
+    ratio_text = _lantern_v0103_ratio_text(delta)
+    return {
+        "reference_dbm": reference_dbm,
+        "delta_db": delta,
+        "power_ratio": ratio_text,
+        "plain": f"{float(max_dbm):.1f} dBm is {delta:.1f} dB, or about {ratio_text}, above the {reference_dbm:.0f} dBm GNSS reference.",
+    }
+
+
+def _lantern_v0103_signal_context(max_dbm, overlaps=None, event_count=0, spike_count=0, spike_dbm=-60.0, *, band_label=None):
+    overlaps = overlaps or []
+    if isinstance(overlaps, str):
+        overlaps = [overlaps]
+    near_gnss = bool(overlaps) or bool(band_label)
+    label = band_label or (", ".join(str(x) for x in overlaps[:3]) if overlaps else "non-GNSS / unlabelled")
+    if max_dbm is None:
+        return {
+            "concern_level": "NO DATA",
+            "headline": "No observed detection level",
+            "briefing": "No MOTH detection level is available for this frequency/bin under the selected filters.",
+            "operator_action": "Do not infer GPS serviceability from absence of a MOTH detection. Use receiver health checks.",
+            "power_comparison": _lantern_v0103_power_comparison(None),
+        }
+    try:
+        max_v = float(max_dbm)
+        spike_v = float(spike_dbm)
+        events = int(event_count or 0)
+        spikes = int(spike_count or 0)
+    except Exception:
+        return {
+            "concern_level": "CHECK",
+            "headline": "Signal level needs review",
+            "briefing": "The dBm value could not be interpreted numerically.",
+            "operator_action": "Review the source row and sensor setup before briefing.",
+            "power_comparison": _lantern_v0103_power_comparison(None),
+        }
+
+    strong = max_v >= spike_v
+    very_strong = max_v >= -50.0
+    moderate = max_v >= -75.0
+    comparison = _lantern_v0103_power_comparison(max_v)
+
+    if strong and near_gnss:
+        return {
+            "concern_level": "HIGH",
+            "headline": "Strong GNSS-band RF detection",
+            "briefing": f"{max_v:.1f} dBm overlaps {label}. Treat as operationally relevant; it could degrade GNSS if it is in-band, wide enough, persistent, or coincides with receiver symptoms.",
+            "operator_action": "Check receiver fix, satellite count by constellation, HDOP/PDOP or OEM quality metric, C/N0 if available, persistence, bandwidth and location correlation.",
+            "power_comparison": comparison,
+        }
+    if very_strong and near_gnss:
+        return {
+            "concern_level": "HIGH",
+            "headline": "Very strong GNSS-window detection",
+            "briefing": f"{max_v:.1f} dBm is very strong and overlaps {label}. Treat as a serious RF indicator until receiver checks prove stability.",
+            "operator_action": "Repeat scan, check for broad/wideband activity, and compare with live equipment GNSS telemetry.",
+            "power_comparison": comparison,
+        }
+    if strong and not near_gnss:
+        return {
+            "concern_level": "CONTEXT",
+            "headline": "Strong RF away from labelled GNSS bands",
+            "briefing": f"{max_v:.1f} dBm is strong RF activity, but it is not automatically a GPS concern unless receiver symptoms coincide or front-end overload is suspected.",
+            "operator_action": "Brief as local RF activity. Check known emitters and receiver symptoms before treating it as GNSS interference.",
+            "power_comparison": comparison,
+        }
+    if near_gnss and (moderate or spikes > 0 or events > 0):
+        return {
+            "concern_level": "CHECK",
+            "headline": "GNSS-band activity to validate",
+            "briefing": f"Activity overlaps {label}, but the strongest value is below the selected strong-spike threshold of {spike_v:.1f} dBm.",
+            "operator_action": "Validate with receiver health data and compare against other available GNSS bands.",
+            "power_comparison": comparison,
+        }
+    if moderate:
+        return {
+            "concern_level": "WATCH",
+            "headline": "Moderate RF activity",
+            "briefing": f"{max_v:.1f} dBm is visible RF activity outside labelled GNSS bands. It is context for the RF picture, not a GPS conclusion by itself.",
+            "operator_action": "Monitor for persistence, recurrence and any correlation with equipment symptoms.",
+            "power_comparison": comparison,
+        }
+    return {
+        "concern_level": "LOW",
+        "headline": "Low immediate GNSS concern from this detection",
+        "briefing": f"{max_v:.1f} dBm is below the selected strong-spike threshold and does not by itself indicate GNSS degradation.",
+        "operator_action": "Keep normal receiver checks in place; do not treat quiet MOTH data as proof of a clear band.",
+        "power_comparison": comparison,
+    }
+
+
+def _lantern_v0103_concern_weight(level):
+    return {"HIGH": 5, "CONTEXT": 4, "CHECK": 3, "WATCH": 2, "LOW": 1, "NO DATA": 0}.get(str(level or "").upper(), 0)
+
+
+def _lantern_v0103_summarise_reporting(clearance, spike_dbm):
+    peak_items = []
+    for p in clearance.get("peak_traffic") or []:
+        ctx = _lantern_v0103_signal_context(
+            p.get("max_dbm"),
+            p.get("overlaps") or [],
+            p.get("event_count") or 0,
+            p.get("spike_count") or 0,
+            spike_dbm,
+        )
+        out = dict(p)
+        out.update(ctx)
+        peak_items.append(out)
+
+    band_items = []
+    for b in clearance.get("band_scores") or []:
+        label = b.get("label") or "GNSS band"
+        ctx = _lantern_v0103_signal_context(
+            b.get("max_dbm"),
+            [label],
+            b.get("event_count") or 0,
+            b.get("spike_count") or 0,
+            spike_dbm,
+            band_label=label,
+        )
+        band_items.append({
+            "id": b.get("id"),
+            "label": label,
+            "min_mhz": b.get("min_mhz"),
+            "max_mhz": b.get("max_mhz"),
+            "event_count": b.get("event_count"),
+            "spike_count": b.get("spike_count"),
+            "max_dbm": b.get("max_dbm"),
+            "clearance_score": b.get("clearance_score"),
+            **ctx,
+        })
+
+    strong_gnss = [p for p in peak_items if p.get("overlaps") and str(p.get("concern_level")) == "HIGH"]
+    strong_non_gnss = [p for p in peak_items if not p.get("overlaps") and str(p.get("concern_level")) in ("CONTEXT", "HIGH")]
+    highest = None
+    if peak_items:
+        highest = sorted(peak_items, key=lambda p: (float(p.get("max_dbm") if p.get("max_dbm") is not None else -999), int(p.get("event_count") or 0)), reverse=True)[0]
+
+    if strong_gnss:
+        top = sorted(strong_gnss, key=lambda p: (float(p.get("max_dbm") or -999), int(p.get("event_count") or 0)), reverse=True)[0]
+        headline = "Strong GNSS-band RF detected"
+        summary = (
+            f"{len(strong_gnss)} peak bin(s) at or above {float(spike_dbm):.1f} dBm overlap GNSS-labelled bands. "
+            f"Highest: {top.get('freq_center_mhz')} MHz at {top.get('max_dbm')} dBm. Treat as operationally relevant and validate against receiver health."
+        )
+        status = "HIGH"
+    elif strong_non_gnss:
+        top = sorted(strong_non_gnss, key=lambda p: (float(p.get("max_dbm") or -999), int(p.get("event_count") or 0)), reverse=True)[0]
+        headline = "Strong RF detected outside labelled GNSS bands"
+        summary = (
+            f"Strong RF is present, with the highest observed peak at {top.get('freq_center_mhz')} MHz / {top.get('max_dbm')} dBm. "
+            "This is not automatically a GPS issue unless receiver symptoms or front-end overload are suspected."
+        )
+        status = "CONTEXT"
+    elif int(clearance.get("total_lband_events") or 0) > 0:
+        headline = "No strong GNSS-band spike at the selected threshold"
+        summary = (
+            f"No peak bin at or above {float(spike_dbm):.1f} dBm overlaps the labelled GNSS bands in the current view. "
+            "Continue receiver checks because MOTH data is event-based."
+        )
+        status = "CHECK"
+    else:
+        headline = "No L-band evidence loaded for interpretation"
+        summary = "No matching L-band MOTH detections are available under the selected filters. Do not infer GPS serviceability."
+        status = "NO DATA"
+
+    return {
+        "status": status,
+        "headline": headline,
+        "summary": summary,
+        "highest_peak": highest,
+        "strong_gnss_peak_count": len(strong_gnss),
+        "strong_non_gnss_peak_count": len(strong_non_gnss),
+        "band_interpretations": band_items,
+        "peak_interpretations": peak_items,
+    }
+
+
+@app.get("/api/lantern/reporting-interpretation")
+def lantern_reporting_interpretation(
+    collection_id: int | None = None,
+    collection_ids: str | None = None,
+    start_utc: str | None = None,
+    end_utc: str | None = None,
+    freq_min_mhz: float = _LANTERN_V0103_QUERY(default=1100.0, ge=900.0, le=2000.0),
+    freq_max_mhz: float = _LANTERN_V0103_QUERY(default=1650.0, ge=900.0, le=2000.0),
+    freq_bin_mhz: float = _LANTERN_V0103_QUERY(default=2.0, ge=0.5, le=25.0),
+    spike_dbm: float = _LANTERN_V0103_QUERY(default=-60.0),
+    min_dbm: float | None = None,
+    max_rows: int = _LANTERN_V0103_QUERY(default=500000, ge=1000, le=2000000),
+):
+    """Plain-English signal-strength interpretation for pilots, flight safety and reports.
+
+    This endpoint deliberately interprets MOTH detections in context: dBm strength,
+    frequency overlap with GNSS bands, persistence/spikes, and required receiver checks.
+    It does not change the deterministic RF burden scoring used by the clearance view.
+    """
+    if "_lantern_build_clearance_payload" not in globals():
+        return {"version": _LANTERN_REPORTING_VERSION, "error": "LANTERN v0.10 clearance payload function is not installed."}
+
+    clearance = _lantern_build_clearance_payload(  # type: ignore[name-defined]
+        collection_id=collection_id,
+        collection_ids=collection_ids,
+        start_utc=start_utc,
+        end_utc=end_utc,
+        freq_min_mhz=freq_min_mhz,
+        freq_max_mhz=freq_max_mhz,
+        freq_bin_mhz=freq_bin_mhz,
+        spike_dbm=spike_dbm,
+        min_dbm=min_dbm,
+        max_rows=max_rows,
+    )
+    summary = _lantern_v0103_summarise_reporting(clearance, spike_dbm)
+    threshold_delta = round(float(spike_dbm) - _LANTERN_REPORTING_REFERENCE_DBM, 1)
+    threshold_ratio = _lantern_v0103_ratio_text(threshold_delta)
+    return {
+        "version": _LANTERN_REPORTING_VERSION,
+        "generated_utc": _lantern_v0103_datetime.now(_lantern_v0103_timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "selected_collection_ids": clearance.get("selected_collection_ids") or [],
+        "selected_window_utc": clearance.get("selected_window_utc"),
+        "spike_dbm": float(spike_dbm),
+        "reference": {
+            "gps_l1_mhz": 1575.42,
+            "gps_l2_mhz": 1227.60,
+            "gps_l5_mhz": 1176.45,
+            "approx_gnss_received_power_dbm": _LANTERN_REPORTING_REFERENCE_DBM,
+            "spike_threshold_delta_db": threshold_delta,
+            "spike_threshold_power_ratio": threshold_ratio,
+            "plain": _LANTERN_REPORTING_REFERENCE_TEXT,
+        },
+        "simple_rule": "A strong MOTH dBm reading becomes a GNSS concern when it is in or near a GNSS band, is wideband or persistent, or correlates with receiver degradation.",
+        "bottom_line": "A strong RF detection is not automatically hostile or unsafe. It becomes operationally concerning for GPS/GNSS when frequency, bandwidth, persistence, location correlation or receiver symptoms support that conclusion.",
+        "top_level": summary,
+        "concern_matrix": [
+            {"case": "Strong detection near GPS L1/E1, L2/G2, L5/E5/B2 or other GNSS band", "level": "HIGH", "reporting_wording": "Operationally relevant GNSS-window RF indicator; validate receiver health and persistence."},
+            {"case": "Strong detection away from labelled GNSS bands", "level": "CONTEXT", "reporting_wording": "Strong local RF activity, but not automatically a GPS issue without receiver symptoms or overload evidence."},
+            {"case": "Broad or recurrent activity across GNSS bands", "level": "HIGH", "reporting_wording": "More concerning than a single narrow spike; compare with fix/satellite/C/N0/HDOP behaviour."},
+            {"case": "A single spike with stable receiver performance", "level": "CHECK", "reporting_wording": "Investigate and monitor; a single spike does not by itself prove equipment failure."},
+            {"case": "No MOTH detection", "level": "NO PROOF OF CLEAR", "reporting_wording": "Do not infer that the band was empty; MOTH data is event-based."},
+        ],
+        "next_checks": [
+            "Frequency: is the peak inside or close to a GNSS band such as L1/E1, L2/G2 or L5/E5?",
+            "Bandwidth: is it a narrow spike, multiple adjacent bins, or broad noise across a GNSS window?",
+            "Persistence: is it constant, pulsed, sweeping, recurrent or isolated?",
+            "Receiver symptoms: loss of satellites, poor fix, position jump, degraded HDOP/PDOP or C/N0 drop.",
+            "Location correlation: does the signal strengthen in a specific area or direction?",
+            "Sensor setup: confirm dBm units, antenna type, placement, gain/settings and comparable scan conditions.",
+        ],
+        "reporting_lines": [
+            f"The selected strong-spike threshold is {float(spike_dbm):.1f} dBm.",
+            f"At {float(spike_dbm):.1f} dBm, an in-band detection is about {threshold_delta:.1f} dB, or {threshold_ratio}, above the practical {int(_LANTERN_REPORTING_REFERENCE_DBM)} dBm GNSS reference.",
+            "Treat strong in-band GNSS detections as operationally relevant, but not as proof of jamming without receiver symptoms, bandwidth/persistence evidence or repeated correlation.",
+            "Treat strong out-of-band detections as RF context unless GNSS performance degrades at the same time or receiver front-end overload is suspected.",
+        ],
+        "limitations": [
+            "MOTH detections are event-based observations, not continuous calibrated spectrum recordings.",
+            "A quiet MOTH window does not prove absence of RF energy, and a single spike does not prove GPS failure.",
+            "Antenna type, placement, gain, scan settings and local geometry can change displayed dBm values.",
+            "Final reporting should combine MOTH observations with equipment receiver logs, independent GPS checks and authorised safety/operational approval.",
+        ],
+    }
+
+# ---- end EEI LANTERN v0.10.3 signal interpretation reporting ----
+
+# ---- EEI LANTERN v0.11.0 Platform Navigation / Deployment layer ----
+# Additive only. Provides platform home, route registry and deployment checks.
+
+from datetime import datetime as _PlatformDateTime, timezone as _PlatformTimezone
+from pathlib import Path as _PlatformPath
+from typing import Any as _PlatformAny
+import importlib.util as _platform_importlib_util
+import sys as _platform_sys
+
+from fastapi.responses import HTMLResponse as _PlatformHTMLResponse
+
+_LANTERN_PLATFORM_VERSION = "0.11.0"
+
+
+def _platform_now() -> str:
+    return _PlatformDateTime.now(_PlatformTimezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _platform_static_dir() -> _PlatformPath:
+    try:
+        return STATIC_DIR  # type: ignore[name-defined]
+    except Exception:
+        return _PlatformPath(__file__).with_name("static")
+
+
+def _platform_page_exists(url: str) -> bool:
+    if url in ("/", ""):
+        return True
+    if url.startswith("/api/"):
+        return True
+    if url.startswith("/lantern") or url.startswith("/app"):
+        return True
+    path = url.split("?", 1)[0]
+    if path.startswith("/static/"):
+        return (_platform_static_dir() / path.replace("/static/", "", 1)).exists()
+    return False
+
+
+def _platform_nav_groups() -> list[dict[str, _PlatformAny]]:
+    groups = [
+        {
+            "group": "Briefing",
+            "items": [
+                {"title": "Platform Home", "url": "/app?v=011", "description": "Role-based start page and deployment status."},
+                {"title": "Flight Safety Brief", "url": "/lantern?v=011", "description": "Pilot and flight-safety GNSS clearance view."},
+                {"title": "Mission Brief", "url": "/static/mission_brief.html?v=091", "description": "RF readiness and mission summary."},
+                {"title": "Print / JSP 101 Report", "url": "/api/mission/report-jsp101.html", "description": "Printable structured RF mission report."},
+            ],
+        },
+        {
+            "group": "Operations",
+            "items": [
+                {"title": "Map / Candidates", "url": "/?v=011", "description": "Upload scans, map hexagons, candidate siting and scoring."},
+                {"title": "Data Quality", "url": "/static/data_quality.html?v=080", "description": "Import quality, scan coverage and confidence checks."},
+                {"title": "Simple Briefing Cards", "url": "/static/briefing.html?v=080", "description": "Plain-English decision cards."},
+            ],
+        },
+        {
+            "group": "Analyst",
+            "items": [
+                {"title": "Launch RF Analyst", "url": "/static/launch_analysis.html?v=075", "description": "L1/L2/L5 timelines, spectrum, spikes and pattern-of-life."},
+                {"title": "Raw Map Dashboard", "url": "/static/index.html?v=011", "description": "Direct static dashboard view if needed."},
+            ],
+        },
+        {
+            "group": "System",
+            "items": [
+                {"title": "Platform Health", "url": "/api/platform/health", "description": "Backend, database and static page health."},
+                {"title": "Deploy Check", "url": "/api/platform/deploy-check", "description": "Runtime dependencies and deployment readiness."},
+                {"title": "API Health", "url": "/api/health", "description": "Core API health endpoint."},
+                {"title": "LANTERN API Health", "url": "/api/lantern/health", "description": "Flight-safety API health endpoint."},
+            ],
+        },
+    ]
+    for group in groups:
+        for item in group["items"]:
+            item["available"] = _platform_page_exists(item["url"])
+    return groups
+
+
+def _platform_db_summary() -> dict[str, _PlatformAny]:
+    db_path = None
+    try:
+        db_path = DB_PATH  # type: ignore[name-defined]
+    except Exception:
+        pass
+    out: dict[str, _PlatformAny] = {
+        "path": str(db_path) if db_path is not None else None,
+        "exists": bool(db_path and _PlatformPath(db_path).exists()),
+        "collection_count": None,
+        "total_event_count": None,
+        "valid_event_count": None,
+    }
+    try:
+        conn = connect()  # type: ignore[name-defined]
+        try:
+            out["collection_count"] = int(conn.execute("SELECT COUNT(*) FROM moth_collections").fetchone()[0] or 0)
+            row = conn.execute("SELECT COUNT(*) AS total, SUM(CASE WHEN valid = 1 THEN 1 ELSE 0 END) AS valid FROM moth_events").fetchone()
+            out["total_event_count"] = int(row[0] or 0)
+            out["valid_event_count"] = int(row[1] or 0)
+        finally:
+            conn.close()
+    except Exception as exc:
+        out["error"] = str(exc)
+    return out
+
+
+def _platform_module_ok(name: str) -> bool:
+    return _platform_importlib_util.find_spec(name) is not None
+
+
+@app.get("/app", response_class=_PlatformHTMLResponse)  # type: ignore[name-defined]
+def lantern_platform_home() -> str:
+    path = _platform_static_dir() / "platform_home.html"
+    if path.exists():
+        return path.read_text(encoding="utf-8")
+    return "<html><body><h1>EEI LANTERN</h1><p>platform_home.html is missing from the static folder.</p></body></html>"
+
+
+@app.get("/api/platform/navigation")  # type: ignore[name-defined]
+def lantern_platform_navigation() -> dict[str, _PlatformAny]:
+    return {
+        "status": "ok",
+        "platform_version": _LANTERN_PLATFORM_VERSION,
+        "generated_utc": _platform_now(),
+        "groups": _platform_nav_groups(),
+        "notes": [
+            "Navigation is role-based: Briefing, Operations, Analyst, System.",
+            "Unavailable static pages remain listed so missing deployments are visible rather than hidden.",
+        ],
+    }
+
+
+@app.get("/api/platform/health")  # type: ignore[name-defined]
+def lantern_platform_health() -> dict[str, _PlatformAny]:
+    static = _platform_static_dir()
+    files = {
+        "platform_home": (static / "platform_home.html").exists(),
+        "platform_shell_css": (static / "platform_shell.css").exists(),
+        "platform_shell_js": (static / "platform_shell.js").exists(),
+        "lantern_flight_safety": (static / "lantern_flight_safety.html").exists(),
+        "launch_analysis": (static / "launch_analysis.html").exists(),
+        "main_index": (static / "index.html").exists(),
+        "data_quality": (static / "data_quality.html").exists(),
+        "mission_brief": (static / "mission_brief.html").exists(),
+    }
+    return {
+        "status": "ok",
+        "platform_version": _LANTERN_PLATFORM_VERSION,
+        "generated_utc": _platform_now(),
+        "static_dir": str(static),
+        "static_files": files,
+        "database": _platform_db_summary(),
+        "navigation_url": "/api/platform/navigation",
+        "home_url": "/app?v=011",
+    }
+
+
+@app.get("/api/platform/deploy-check")  # type: ignore[name-defined]
+def lantern_platform_deploy_check() -> dict[str, _PlatformAny]:
+    static = _platform_static_dir()
+    db = _platform_db_summary()
+    required_static = [
+        ("platform_home.html", static / "platform_home.html"),
+        ("platform_shell.css", static / "platform_shell.css"),
+        ("platform_shell.js", static / "platform_shell.js"),
+        ("lantern_flight_safety.html", static / "lantern_flight_safety.html"),
+    ]
+    modules = ["fastapi", "uvicorn", "pandas", "h3", "orjson", "pydantic"]
+    checks: list[dict[str, _PlatformAny]] = []
+    checks.append({"name": "Python", "status": "pass", "detail": _platform_sys.version.split()[0]})
+    checks.append({"name": "Database path", "status": "pass" if db.get("exists") else "warn", "detail": db.get("path") or "DB_PATH unavailable"})
+    for name, path in required_static:
+        checks.append({"name": f"Static file: {name}", "status": "pass" if path.exists() else "fail", "detail": str(path)})
+    for mod in modules:
+        checks.append({"name": f"Python module: {mod}", "status": "pass" if _platform_module_ok(mod) else "fail", "detail": "available" if _platform_module_ok(mod) else "missing"})
+    optional = ["webview", "PyInstaller"]
+    for mod in optional:
+        checks.append({"name": f"Optional packaging module: {mod}", "status": "pass" if _platform_module_ok(mod) else "warn", "detail": "available" if _platform_module_ok(mod) else "optional; install for desktop packaging"})
+    fail_count = sum(1 for c in checks if c["status"] == "fail")
+    warn_count = sum(1 for c in checks if c["status"] == "warn")
+    return {
+        "status": "ready" if fail_count == 0 else "not_ready",
+        "platform_version": _LANTERN_PLATFORM_VERSION,
+        "generated_utc": _platform_now(),
+        "fail_count": fail_count,
+        "warn_count": warn_count,
+        "checks": checks,
+        "deployment_guidance": [
+            "Use Start_LANTERN_Local.ps1 for local browser mode.",
+            "Use LANTERN_App.ps1 for the desktop wrapper when pywebview is installed.",
+            "Use Build_LANTERN_Desktop.ps1 after deploy-check returns no failures.",
+        ],
+    }
+
+# ---- end EEI LANTERN v0.11.0 Platform Navigation / Deployment layer ----
+
+# ---- EEI LANTERN v0.11.3 J2 Live Article Rotator API ----
+# Restores the real J2 Live Report article list, links and live-update feed.
+# This block is intentionally additive, but the installer removes earlier broken /api/j2 blocks first.
+
+import csv as _j2_csv
+import html as _j2_html
+import io as _j2_io
+import json as _j2_json
+import re as _j2_re
+import time as _j2_time
+import urllib.parse as _j2_urllib_parse
+import urllib.request as _j2_urllib_request
+import xml.etree.ElementTree as _j2_ET
+from datetime import datetime as _j2_datetime, timezone as _j2_timezone
+from email.utils import parsedate_to_datetime as _j2_parsedate_to_datetime
+from pathlib import Path as _J2Path
+from typing import Any as _J2Any
+
+from fastapi import Query as _J2Query
+from fastapi.responses import HTMLResponse as _J2HTMLResponse, Response as _J2Response
+
+_J2_API_VERSION = "0.11.3"
+_J2_CACHE_SECONDS = 10 * 60
+_J2_DEFAULT_AOI = "Aden Adde / Mogadishu"
+_J2_DEFAULT_ROTATE_SECONDS = 12
+_J2_DEFAULT_LIVE_REFRESH_MINUTES = 5
+
+
+def _j2_now() -> str:
+    return _j2_datetime.now(_j2_timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _j2_static_dir() -> _J2Path:
+    try:
+        return STATIC_DIR  # type: ignore[name-defined]
+    except Exception:
+        return _J2Path(__file__).with_name("static")
+
+
+def _j2_cache_dir() -> _J2Path:
+    try:
+        root = _J2Path(UPLOAD_DIR) / "j2_cache"  # type: ignore[name-defined]
+    except Exception:
+        root = _j2_static_dir().parent / "j2_cache"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _j2_safe_key(text: str) -> str:
+    key = _j2_re.sub(r"[^A-Za-z0-9._-]+", "_", (text or "default").strip())[:96]
+    return key or "default"
+
+
+def _j2_news_cache_path(aoi: str) -> _J2Path:
+    return _j2_cache_dir() / f"news_{_j2_safe_key(aoi)}.json"
+
+
+def _j2_report_cache_path() -> _J2Path:
+    return _j2_cache_dir() / "last_j2_report.json"
+
+
+def _j2_read_json(path: _J2Path) -> dict[str, _J2Any] | None:
+    try:
+        if not path.exists():
+            return None
+        return _j2_json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _j2_write_json(path: _J2Path, payload: dict[str, _J2Any]) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_j2_json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _j2_clean_text(value: str | None) -> str:
+    if value is None:
+        return ""
+    text = str(value)
+    text = _j2_re.sub(r"<[^>]+>", " ", text)
+    text = _j2_html.unescape(text)
+    text = _j2_re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _j2_pub_to_iso(value: str | None) -> str | None:
+    text = _j2_clean_text(value)
+    if not text:
+        return None
+    try:
+        dt = _j2_parsedate_to_datetime(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_j2_timezone.utc)
+        return dt.astimezone(_j2_timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    except Exception:
+        return text
+
+
+def _j2_parse_ids(collection_id: int | None = None, collection_ids: str | None = None) -> list[int]:
+    try:
+        return parse_collection_ids(collection_id=collection_id, collection_ids=collection_ids)  # type: ignore[name-defined]
+    except Exception:
+        ids: set[int] = set()
+        if collection_id not in (None, ""):
+            try:
+                ids.add(int(collection_id))
+            except Exception:
+                pass
+        if collection_ids:
+            for part in str(collection_ids).replace(";", ",").split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                try:
+                    ids.add(int(part))
+                except Exception:
+                    continue
+        return sorted(ids)
+
+
+def _j2_collection_filter(ids: list[int], where: list[str], params: list[_J2Any]) -> None:
+    if ids:
+        where.append("collection_id IN (" + ",".join("?" for _ in ids) + ")")
+        params.extend(ids)
+
+
+def _j2_freq_case_sql() -> str:
+    return """
+        CASE
+          WHEN frequency_hz BETWEEN 1555420000 AND 1595420000 THEN 'L1'
+          WHEN frequency_hz BETWEEN 1207600000 AND 1247600000 THEN 'L2'
+          WHEN frequency_hz BETWEEN 1156450000 AND 1196450000 THEN 'L5'
+          ELSE 'OTHER'
+        END
+    """
+
+
+def _j2_local_metrics(collection_id: int | None = None, collection_ids: str | None = None) -> dict[str, _J2Any]:
+    ids = _j2_parse_ids(collection_id=collection_id, collection_ids=collection_ids)
+    where = ["1=1"]
+    params: list[_J2Any] = []
+    _j2_collection_filter(ids, where, params)
+    where_sql = " AND ".join(where)
+    try:
+        conn = connect()  # type: ignore[name-defined]
+        try:
+            totals = dict(conn.execute(
+                f"""
+                SELECT
+                  COUNT(*) AS total_events,
+                  SUM(CASE WHEN valid = 1 THEN 1 ELSE 0 END) AS valid_events,
+                  COUNT(DISTINCT collection_id) AS collection_count,
+                  MIN(timestamp_utc) AS first_timestamp_utc,
+                  MAX(timestamp_utc) AS last_timestamp_utc,
+                  MIN(frequency_hz) AS min_frequency_hz,
+                  MAX(frequency_hz) AS max_frequency_hz,
+                  MIN(strength_dbm) AS min_dbm,
+                  MAX(strength_dbm) AS max_dbm,
+                  ROUND(AVG(strength_dbm), 1) AS avg_dbm
+                FROM moth_events
+                WHERE {where_sql}
+                """,
+                params,
+            ).fetchone())
+            gnss = rows_to_dicts(conn.execute(  # type: ignore[name-defined]
+                f"""
+                SELECT {_j2_freq_case_sql()} AS band,
+                       COUNT(*) AS event_count,
+                       SUM(CASE WHEN strength_dbm >= -60 THEN 1 ELSE 0 END) AS strong_spike_count,
+                       ROUND(AVG(strength_dbm), 1) AS avg_dbm,
+                       MIN(strength_dbm) AS min_dbm,
+                       MAX(strength_dbm) AS max_dbm
+                FROM moth_events
+                WHERE valid = 1
+                  AND frequency_hz IS NOT NULL
+                  AND strength_dbm IS NOT NULL
+                  AND {where_sql}
+                GROUP BY band
+                ORDER BY CASE band WHEN 'L1' THEN 1 WHEN 'L2' THEN 2 WHEN 'L5' THEN 3 ELSE 4 END
+                """,
+                params,
+            ).fetchall())
+            latest_collections = rows_to_dicts(conn.execute(  # type: ignore[name-defined]
+                """
+                SELECT collection_id, collection_name, upload_time_utc
+                FROM moth_collections
+                ORDER BY upload_time_utc DESC, collection_id DESC
+                LIMIT 10
+                """
+            ).fetchall())
+        finally:
+            conn.close()
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "selected_collection_ids": ids,
+            "totals": {},
+            "gnss_bands": [],
+            "latest_collections": [],
+            "valid_event_count": 0,
+            "total_event_count": 0,
+            "gnss_event_count": 0,
+            "strong_gnss_spike_count": 0,
+            "has_local_data": False,
+        }
+    by_band = {str(r.get("band")): r for r in gnss}
+    for band in ("L1", "L2", "L5", "OTHER"):
+        by_band.setdefault(band, {"band": band, "event_count": 0, "strong_spike_count": 0, "avg_dbm": None, "min_dbm": None, "max_dbm": None})
+    total = int(totals.get("total_events") or 0)
+    valid = int(totals.get("valid_events") or 0)
+    strong_gnss = sum(int(by_band[b].get("strong_spike_count") or 0) for b in ("L1", "L2", "L5"))
+    gnss_events = sum(int(by_band[b].get("event_count") or 0) for b in ("L1", "L2", "L5"))
+    return {
+        "ok": True,
+        "selected_collection_ids": ids,
+        "totals": totals,
+        "gnss_bands": [by_band["L1"], by_band["L2"], by_band["L5"], by_band["OTHER"]],
+        "latest_collections": latest_collections,
+        "valid_event_count": valid,
+        "total_event_count": total,
+        "gnss_event_count": gnss_events,
+        "strong_gnss_spike_count": strong_gnss,
+        "has_local_data": valid > 0,
+    }
+
+
+def _j2_source_register(aoi: str = _J2_DEFAULT_AOI) -> list[dict[str, _J2Any]]:
+    return [
+        {
+            "title": "EASA GNSS outages and alterations watch page",
+            "source": "EASA",
+            "url": "https://www.easa.europa.eu/en/domains/air-operations/global-navigation-satellite-system-outages-and-alterations",
+            "published_utc": None,
+            "category": "GNSS/RF",
+            "confidence": "source-register",
+            "summary": "Official aviation safety watch page for GNSS jamming/spoofing affected areas. Treat as current OSINT context, not local receiver proof.",
+            "aoi": aoi,
+            "live": False,
+        },
+        {
+            "title": "EASA Somalia conflict-zone information bulletin",
+            "source": "EASA CZIB",
+            "url": "https://www.easa.europa.eu/en/domains/air-operations/czibs/czib-2017-05r19",
+            "published_utc": None,
+            "category": "Aviation",
+            "confidence": "source-register",
+            "summary": "Official conflict-zone aviation context relevant to conservative airport-area planning and formal coordination.",
+            "aoi": aoi,
+            "live": False,
+        },
+        {
+            "title": "GPSJam daily GPS/GNSS interference map",
+            "source": "GPSJam",
+            "url": "https://gpsjam.org/",
+            "published_utc": None,
+            "category": "GNSS/RF",
+            "confidence": "indicator",
+            "summary": "ADS-B-derived GPS/GNSS interference map. Useful daily watch item, but not a direct local MOTH or equipment receiver measurement.",
+            "aoi": aoi,
+            "live": False,
+        },
+        {
+            "title": "Flightradar24 GPS jamming and interference map methodology",
+            "source": "Flightradar24",
+            "url": "https://www.flightradar24.com/data/gps-jamming",
+            "published_utc": None,
+            "category": "GNSS/RF",
+            "confidence": "indicator",
+            "summary": "ADS-B-derived indicator of possible GNSS interference. Useful for cross-checking, not local equipment serviceability evidence.",
+            "aoi": aoi,
+            "live": False,
+        },
+        {
+            "title": "Somalia Civil Aviation Authority eAIP - HCMM Aden Adde Intl",
+            "source": "SCAA eAIP",
+            "url": "https://aip.scaa.gov.so/eAIP/HC-AD-2.HCMM-en-GB.html",
+            "published_utc": None,
+            "category": "Aviation",
+            "confidence": "official-source",
+            "summary": "Official aeronautical source for airport facts, constraints and published procedures. Use with current NOTAM/coordination checks.",
+            "aoi": aoi,
+            "live": False,
+        },
+        {
+            "title": "IFALPA/IFATCA: unlawful communications interference within Mogadishu FIR",
+            "source": "IFALPA / IFATCA",
+            "url": "https://ifatca.org/unlawful-communication-interference-within-the-mogadishu-fir/",
+            "published_utc": "2024-02-29T00:00:00Z",
+            "category": "Security",
+            "confidence": "background",
+            "summary": "Communications-interference context. Relevant to RF awareness and coordination, but not direct proof of GNSS jamming.",
+            "aoi": aoi,
+            "live": False,
+        },
+        {
+            "title": "FAA GPS/GNSS Interference Resource Guide",
+            "source": "FAA",
+            "url": "https://www.faa.gov/about/office_org/headquarters_offices/avs/offices/afx/afs/afs400/afs410/GNSS/GPS_GNSS_Interference_Resource_Guide.pdf",
+            "published_utc": None,
+            "category": "Aviation",
+            "confidence": "reference",
+            "summary": "Operational reference for recognising, reporting and responding to GPS/GNSS interference.",
+            "aoi": aoi,
+            "live": False,
+        },
+    ]
+
+
+def _j2_query_variants(aoi: str) -> list[str]:
+    base = (aoi or _J2_DEFAULT_AOI).strip()
+    terms = [
+        f'{base} GNSS jamming GPS interference aviation',
+        f'{base} GPS jamming spoofing GNSS',
+        'Mogadishu FIR GNSS jamming spoofing GPS interference',
+        'Somalia GNSS jamming GPS interference aviation',
+        'HCSM Mogadishu GNSS jamming spoofing',
+    ]
+    seen: set[str] = set()
+    out: list[str] = []
+    for term in terms:
+        key = term.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(term)
+    return out
+
+
+def _j2_fetch_news_rss(query: str, limit: int) -> tuple[list[dict[str, _J2Any]], str | None]:
+    rss_url = "https://news.google.com/rss/search?" + _j2_urllib_parse.urlencode({"q": query, "hl": "en-GB", "gl": "GB", "ceid": "GB:en"})
+    req = _j2_urllib_request.Request(rss_url, headers={"User-Agent": "EEI-LANTERN-J2/0.11.3"})
+    try:
+        with _j2_urllib_request.urlopen(req, timeout=7) as resp:
+            raw = resp.read(900000)
+        root = _j2_ET.fromstring(raw)
+        items: list[dict[str, _J2Any]] = []
+        for item in root.findall(".//item")[: max(1, int(limit))]:
+            title = _j2_clean_text(item.findtext("title"))
+            url = _j2_clean_text(item.findtext("link"))
+            pub = _j2_pub_to_iso(item.findtext("pubDate"))
+            desc = _j2_clean_text(item.findtext("description"))
+            source_el = item.find("source")
+            source = _j2_clean_text(source_el.text if source_el is not None else "Google News") or "Google News"
+            if not title or not url:
+                continue
+            items.append({
+                "title": title,
+                "source": source,
+                "url": url,
+                "published_utc": pub,
+                "category": "Live OSINT",
+                "confidence": "live-feed",
+                "summary": desc[:520],
+                "query": query,
+                "live": True,
+            })
+        return items, None
+    except Exception as exc:
+        return [], str(exc)
+
+
+def _j2_fetch_live_articles(aoi: str, limit: int) -> tuple[list[dict[str, _J2Any]], list[str]]:
+    items: list[dict[str, _J2Any]] = []
+    errors: list[str] = []
+    for query in _j2_query_variants(aoi):
+        got, err = _j2_fetch_news_rss(query, max(3, min(10, int(limit))))
+        if err:
+            errors.append(f"{query}: {err}")
+        items.extend(got)
+        if len(items) >= int(limit):
+            break
+    return items, errors[:5]
+
+
+def _j2_dedupe_articles(items: list[dict[str, _J2Any]], limit: int = 20) -> list[dict[str, _J2Any]]:
+    seen: set[str] = set()
+    out: list[dict[str, _J2Any]] = []
+    for item in items:
+        url = str(item.get("url") or "").strip()
+        title = str(item.get("title") or "").strip()
+        key = (url or title).lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        if "aoi" not in item:
+            item["aoi"] = _J2_DEFAULT_AOI
+        out.append(item)
+        if len(out) >= int(limit):
+            break
+    return out
+
+
+def _j2_news_payload(aoi: str, live: bool, limit: int, force: bool = False) -> dict[str, _J2Any]:
+    aoi = (aoi or _J2_DEFAULT_AOI).strip() or _J2_DEFAULT_AOI
+    limit = max(1, min(int(limit), 50))
+    cache_path = _j2_news_cache_path(aoi)
+    cached = _j2_read_json(cache_path)
+    cache_age = None
+    if cached:
+        try:
+            cache_age = int(_j2_time.time() - float(cached.get("cache_epoch", 0)))
+        except Exception:
+            cache_age = None
+    if cached and not force and (not live or (cache_age is not None and cache_age < _J2_CACHE_SECONDS)):
+        cached["cache_used"] = True
+        cached["cache_age_seconds"] = cache_age
+        return cached
+
+    live_items: list[dict[str, _J2Any]] = []
+    live_errors: list[str] = []
+    if live:
+        live_items, live_errors = _j2_fetch_live_articles(aoi, limit=limit)
+
+    cached_items = cached.get("articles", []) if isinstance(cached, dict) else []
+    register_items = _j2_source_register(aoi)
+    items = _j2_dedupe_articles(live_items + cached_items + register_items, limit=limit)
+    live_count = sum(1 for item in items if item.get("live"))
+    payload = {
+        "status": "ok",
+        "j2_api_version": _J2_API_VERSION,
+        "generated_utc": _j2_now(),
+        "cache_epoch": _j2_time.time(),
+        "aoi": aoi,
+        "live_attempted": bool(live),
+        "live_count": live_count,
+        "live_errors": live_errors,
+        "cache_used": False,
+        "cache_age_seconds": None,
+        "count": len(items),
+        "articles": items,
+        "source_log": [
+            {"source": item.get("source"), "url": item.get("url"), "confidence": item.get("confidence"), "category": item.get("category"), "title": item.get("title")}
+            for item in items
+        ],
+        "message": "Live OSINT article feed refreshed." if live_count else "Live article feed unavailable or empty; using cached/source-register links.",
+        "limitations": [
+            "OSINT feeds are indicators, not local receiver measurements.",
+            "Use MOTH scan data and equipment GNSS telemetry for measured serviceability decisions.",
+            "External feeds may be blocked or stale; preserve source links with the briefing pack.",
+        ],
+    }
+    _j2_write_json(cache_path, payload)
+    return payload
+
+
+@app.get("/api/j2/health")  # type: ignore[name-defined]
+def api_j2_health() -> dict[str, _J2Any]:
+    static = _j2_static_dir()
+    return {
+        "status": "ok",
+        "j2_api_version": _J2_API_VERSION,
+        "page": "/static/j2_report.html?v=113",
+        "cache_dir": str(_j2_cache_dir()),
+        "static_j2_report_html": (static / "j2_report.html").exists(),
+        "rotate_seconds": _J2_DEFAULT_ROTATE_SECONDS,
+        "live_refresh_minutes": _J2_DEFAULT_LIVE_REFRESH_MINUTES,
+        "endpoints": [
+            "/api/j2/news",
+            "/api/j2/articles",
+            "/api/j2/report",
+            "/api/j2/cache",
+            "/api/j2/report.html",
+            "/api/j2/export.csv",
+            "/api/mission/report-jsp101.html",
+        ],
+    }
+
+
+@app.get("/api/j2/status")  # type: ignore[name-defined]
+def api_j2_status() -> dict[str, _J2Any]:
+    return api_j2_health()
+
+
+@app.get("/api/j2/news")  # type: ignore[name-defined]
+def api_j2_news(
+    aoi: str = _J2_DEFAULT_AOI,
+    live: bool = True,
+    force: bool = False,
+    limit: int = _J2Query(default=20, ge=1, le=50),
+) -> dict[str, _J2Any]:
+    return _j2_news_payload(aoi=aoi, live=bool(live), limit=int(limit), force=bool(force))
+
+
+@app.get("/api/j2/articles")  # type: ignore[name-defined]
+def api_j2_articles(
+    aoi: str = _J2_DEFAULT_AOI,
+    live: bool = True,
+    force: bool = False,
+    limit: int = _J2Query(default=20, ge=1, le=50),
+) -> dict[str, _J2Any]:
+    return api_j2_news(aoi=aoi, live=live, force=force, limit=limit)
+
+
+@app.post("/api/j2/news")  # type: ignore[name-defined]
+def api_j2_news_post(
+    aoi: str = _J2_DEFAULT_AOI,
+    live: bool = True,
+    force: bool = False,
+    limit: int = 20,
+) -> dict[str, _J2Any]:
+    return _j2_news_payload(aoi=aoi, live=bool(live), limit=int(limit), force=bool(force))
+
+
+def _j2_assessment_from_metrics(metrics: dict[str, _J2Any], news_payload: dict[str, _J2Any]) -> dict[str, _J2Any]:
+    valid = int(metrics.get("valid_event_count") or 0)
+    gnss_events = int(metrics.get("gnss_event_count") or 0)
+    strong_gnss = int(metrics.get("strong_gnss_spike_count") or 0)
+    article_count = int(news_payload.get("count") or 0)
+    live_count = int(news_payload.get("live_count") or 0)
+
+    if valid <= 0:
+        overall = "NO DATA"
+        gnss_rf = "NO DATA"
+        confidence = "LOW"
+        headline = "No local RF data loaded; J2 view is OSINT/context only."
+        judgement = "Do not infer GNSS serviceability from this page until local MOTH RF data and equipment GNSS telemetry are available."
+        action = "Load/select MOTH collections, confirm equipment GPS receiver health, then refresh the J2 report."
+    elif strong_gnss > 0:
+        overall = "CHECK"
+        gnss_rf = "ELEVATED"
+        confidence = "MEDIUM" if valid >= 500 else "LOW"
+        headline = f"Strong GNSS-window RF activity observed: {strong_gnss} event(s) at or above -60 dBm."
+        judgement = "Treat the GNSS environment as potentially degraded until receiver health and independent checks remain stable."
+        action = "Review L1/L2/L5 bands, check receiver fix/satellite/HDOP-PDOP health, and compare with current OSINT before task execution."
+    elif gnss_events > 0:
+        overall = "CHECK"
+        gnss_rf = "WATCH"
+        confidence = "MEDIUM" if valid >= 500 else "LOW"
+        headline = "GNSS-window RF activity observed without strong -60 dBm spikes in the selected data."
+        judgement = "Lower apparent RF burden is useful, but it is not proof of GNSS receiver integrity."
+        action = "Use as RF decision-support only; continue equipment receiver validation and source checks."
+    else:
+        overall = "WATCH"
+        gnss_rf = "LOW OBSERVED"
+        confidence = "MEDIUM" if valid >= 500 else "LOW"
+        headline = "No GNSS-window activity observed in the selected local data."
+        judgement = "This may indicate a quieter observed window, but no detection does not prove the band was clear."
+        action = "Maintain receiver validation and repeat checks across the intended task period."
+
+    source_status = "LIVE" if live_count else "SOURCE REGISTER"
+    security = "CHECK" if article_count else "NO DATA"
+    aviation = "CHECK" if article_count else "NO DATA"
+    if live_count <= 0 and article_count:
+        confidence = "LOW" if valid <= 0 else confidence
+
+    cards = [
+        {"key": "overall", "label": "OVERALL J2", "value": overall, "detail": headline},
+        {"key": "gnss_rf", "label": "GNSS/RF", "value": gnss_rf, "detail": f"GNSS events: {gnss_events}; strong GNSS spikes >= -60 dBm: {strong_gnss}."},
+        {"key": "security", "label": "SECURITY", "value": security, "detail": "Conflict-zone / RF interference context requires current source checks."},
+        {"key": "aviation", "label": "AVIATION", "value": aviation, "detail": "Aviation relevance requires official/source-register checks and local operating approval."},
+        {"key": "source", "label": "SOURCE FEED", "value": source_status, "detail": f"Live articles: {live_count}; total links: {article_count}."},
+        {"key": "confidence", "label": "CONFIDENCE", "value": confidence, "detail": f"Local valid RF rows: {valid}; source items: {article_count}."},
+    ]
+
+    return {
+        "overall_j2": overall,
+        "gnss_rf": gnss_rf,
+        "security": security,
+        "aviation": aviation,
+        "source_status": source_status,
+        "confidence": confidence,
+        "headline": headline,
+        "current_judgement": judgement,
+        "recommended_action": action,
+        "cards": cards,
+    }
+
+
+@app.get("/api/j2/report")  # type: ignore[name-defined]
+def api_j2_report(
+    aoi: str = _J2_DEFAULT_AOI,
+    collection_id: int | None = None,
+    collection_ids: str | None = None,
+    live: bool = True,
+    force: bool = False,
+    limit: int = _J2Query(default=20, ge=1, le=50),
+) -> dict[str, _J2Any]:
+    metrics = _j2_local_metrics(collection_id=collection_id, collection_ids=collection_ids)
+    news_payload = _j2_news_payload(aoi=aoi, live=bool(live), limit=int(limit), force=bool(force))
+    assessment = _j2_assessment_from_metrics(metrics, news_payload)
+    sections = {
+        "j2_summary": [
+            assessment["headline"],
+            assessment["current_judgement"],
+            assessment["recommended_action"],
+        ],
+        "gnss_rf": [
+            f"Valid local RF rows: {metrics.get('valid_event_count', 0)}.",
+            f"GNSS-window events: {metrics.get('gnss_event_count', 0)}.",
+            f"Strong GNSS-window detections >= -60 dBm: {metrics.get('strong_gnss_spike_count', 0)}.",
+            "Interpret MOTH activity as observed RF evidence, not continuous calibrated spectrum truth.",
+        ],
+        "threat_actors": [
+            "Do not attribute interference to a threat actor unless the cited source explicitly supports it.",
+            "Separate local RF measurements from public-source attribution language.",
+            "Use the article list/source log for awareness and traceability, not for unsupported attribution.",
+        ],
+        "aviation": [
+            "Check official aeronautical information, current NOTAM/eAIP status and local coordination notes before relying on GPS.",
+            "Use OSINT indicators alongside equipment receiver checks and authorised safety case controls.",
+            "Public ADS-B derived interference indicators are not direct local receiver measurements.",
+        ],
+    }
+    payload = {
+        "status": "ok",
+        "j2_api_version": _J2_API_VERSION,
+        "generated_utc": _j2_now(),
+        "aoi": aoi,
+        "selected_collection_ids": metrics.get("selected_collection_ids", []),
+        **assessment,
+        "metrics": metrics,
+        "news": news_payload,
+        "articles": news_payload.get("articles", []),
+        "sections": sections,
+        "jsp101_report_url": "/api/mission/report-jsp101.html",
+        "safety_boundary": "Decision-support only. Does not authorise flight, certify GNSS performance, or provide tactical targeting intelligence.",
+        "limitations": [
+            "MOTH data is event-based. No detection does not prove the band was empty.",
+            "OSINT article feeds are external indicators, not local receiver measurements.",
+            "Final serviceability requires equipment receiver checks and authorised operating constraints.",
+        ],
+    }
+    _j2_write_json(_j2_report_cache_path(), payload)
+    return payload
+
+
+@app.post("/api/j2/report")  # type: ignore[name-defined]
+def api_j2_report_post(
+    aoi: str = _J2_DEFAULT_AOI,
+    collection_id: int | None = None,
+    collection_ids: str | None = None,
+    live: bool = True,
+    force: bool = False,
+    limit: int = 20,
+) -> dict[str, _J2Any]:
+    return api_j2_report(aoi=aoi, collection_id=collection_id, collection_ids=collection_ids, live=live, force=force, limit=limit)
+
+
+@app.get("/api/j2/cache")  # type: ignore[name-defined]
+def api_j2_cache() -> dict[str, _J2Any]:
+    cached = _j2_read_json(_j2_report_cache_path())
+    if cached:
+        cached["cache_used"] = True
+        return cached
+    return api_j2_report(live=False)
+
+
+@app.get("/api/j2/live-report")  # type: ignore[name-defined]
+def api_j2_live_report(aoi: str = _J2_DEFAULT_AOI, collection_ids: str | None = None) -> dict[str, _J2Any]:
+    return api_j2_report(aoi=aoi, collection_ids=collection_ids, live=True, force=True)
+
+
+@app.get("/api/j2/report.json")  # type: ignore[name-defined]
+def api_j2_report_json(aoi: str = _J2_DEFAULT_AOI, collection_ids: str | None = None) -> dict[str, _J2Any]:
+    return api_j2_report(aoi=aoi, collection_ids=collection_ids, live=True, force=False)
+
+
+@app.get("/api/j2/report.html", response_class=_J2HTMLResponse)  # type: ignore[name-defined]
+def api_j2_report_html() -> str:
+    data = api_j2_cache()
+    def esc(x: _J2Any) -> str:
+        return _j2_html.escape("" if x is None else str(x))
+    articles = data.get("articles") or []
+    rows = "".join(
+        f"<tr><td>{esc(a.get('source'))}</td><td><a href='{esc(a.get('url'))}'>{esc(a.get('title'))}</a><br><small>{esc(a.get('summary'))}</small></td><td>{esc(a.get('published_utc'))}</td><td>{esc(a.get('category'))}</td><td>{esc(a.get('confidence'))}</td></tr>"
+        for a in articles[:30]
+    )
+    cards = "".join(
+        f"<tr><td>{esc(c.get('label'))}</td><td>{esc(c.get('value'))}</td><td>{esc(c.get('detail'))}</td></tr>"
+        for c in data.get("cards", [])
+    )
+    return f"""
+<!doctype html><html><head><meta charset='utf-8'><title>J2 Live Report Export</title>
+<style>body{{font-family:Arial,sans-serif;max-width:1100px;margin:24px auto;color:#111}}table{{width:100%;border-collapse:collapse;margin:12px 0}}td,th{{border:1px solid #bbb;padding:6px;text-align:left;vertical-align:top}}th{{background:#17365d;color:#fff}}.warn{{border-left:5px solid #b42318;padding:8px;background:#fff8f8}}small{{color:#555}}@media print{{button{{display:none}}}}</style></head><body>
+<button onclick='window.print()'>Print / save PDF</button>
+<h1>EEI LANTERN J2 Live Report</h1>
+<p>Generated UTC: {esc(data.get('generated_utc'))} | AOI: {esc(data.get('aoi'))}</p>
+<h2>Executive summary</h2><p><b>{esc(data.get('headline'))}</b></p><p>{esc(data.get('current_judgement'))}</p><p><b>Recommended action:</b> {esc(data.get('recommended_action'))}</p>
+<h2>Cards</h2><table><tr><th>Card</th><th>Value</th><th>Detail</th></tr>{cards}</table>
+<h2>Article/source log</h2><table><tr><th>Source</th><th>Article/source</th><th>Published</th><th>Category</th><th>Confidence</th></tr>{rows}</table>
+<div class='warn'><h2>Safety boundary</h2><p>{esc(data.get('safety_boundary'))}</p></div>
+</body></html>
+"""
+
+
+@app.get("/api/j2/export.csv")  # type: ignore[name-defined]
+def api_j2_export_csv() -> _J2Response:
+    data = api_j2_cache()
+    out = _j2_io.StringIO()
+    writer = _j2_csv.writer(out)
+    writer.writerow(["generated_utc", "aoi", "section", "source", "title", "published_utc", "category", "confidence", "url", "summary"])
+    for item in data.get("articles") or []:
+        writer.writerow([
+            data.get("generated_utc"),
+            data.get("aoi"),
+            "article",
+            item.get("source"),
+            item.get("title"),
+            item.get("published_utc"),
+            item.get("category"),
+            item.get("confidence"),
+            item.get("url"),
+            item.get("summary"),
+        ])
+    return _J2Response(out.getvalue(), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=lantern_j2_source_log.csv"})
+
+
+@app.get("/api/j2/live")  # type: ignore[name-defined]
+def api_j2_live_alias(aoi: str = _J2_DEFAULT_AOI, collection_ids: str | None = None) -> dict[str, _J2Any]:
+    return api_j2_report(aoi=aoi, collection_ids=collection_ids, live=True, force=True)
+
+
+@app.get("/api/j2/summary")  # type: ignore[name-defined]
+def api_j2_summary_alias(aoi: str = _J2_DEFAULT_AOI, collection_ids: str | None = None) -> dict[str, _J2Any]:
+    return api_j2_report(aoi=aoi, collection_ids=collection_ids, live=False, force=False)
+
+# ---- end EEI LANTERN v0.11.3 J2 Live Article Rotator API ----
+
+# ---- EEI LANTERN v0.11.4a J2 Threat Actors endpoint hotfix ----
+# Restores /api/j2/threat-actors when the v0.11.4 static J2 page is present but the route was not registered.
+# This is deliberately self-contained and uses existing /api/j2/news when available.
+
+import html as _j2hf_html
+import re as _j2hf_re
+import urllib.parse as _j2hf_urlparse
+import urllib.request as _j2hf_urlrequest
+import xml.etree.ElementTree as _j2hf_ET
+from datetime import datetime as _j2hf_datetime, timezone as _j2hf_timezone
+from email.utils import parsedate_to_datetime as _j2hf_parsedate_to_datetime
+from typing import Any as _J2HFAny
+
+from fastapi import Query as _J2HFQuery
+
+_J2HF_VERSION = "0.11.4a"
+_J2HF_DEFAULT_AOI = "Aden Adde / Mogadishu"
+
+
+def _j2hf_now() -> str:
+    return _j2hf_datetime.now(_j2hf_timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _j2hf_clean_text(value: _J2HFAny) -> str:
+    if value is None:
+        return ""
+    text = str(value)
+    text = _j2hf_re.sub(r"<[^>]+>", " ", text)
+    text = _j2hf_html.unescape(text)
+    return _j2hf_re.sub(r"\s+", " ", text).strip()
+
+
+def _j2hf_pub_to_iso(value: _J2HFAny) -> str | None:
+    text = _j2hf_clean_text(value)
+    if not text:
+        return None
+    try:
+        dt = _j2hf_parsedate_to_datetime(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_j2hf_timezone.utc)
+        return dt.astimezone(_j2hf_timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    except Exception:
+        return text
+
+
+def _j2hf_source_register(aoi: str = _J2HF_DEFAULT_AOI) -> list[dict[str, _J2HFAny]]:
+    return [
+        {
+            "title": "EASA Somalia conflict-zone information bulletin",
+            "source": "EASA CZIB",
+            "url": "https://www.easa.europa.eu/en/domains/air-operations/czibs/czib-2017-05r19",
+            "published_utc": None,
+            "category": "Aviation / Security",
+            "confidence": "official-source",
+            "summary": "Official conflict-zone aviation context. Use for operating constraints, NOTAM/coordination checks and conservative planning around Somali airspace.",
+            "aoi": aoi,
+            "live": False,
+        },
+        {
+            "title": "UN Security Council Somalia / Al-Shabaab sanctions material",
+            "source": "UN Security Council",
+            "url": "https://main.un.org/securitycouncil/en/sanctions/2713",
+            "published_utc": None,
+            "category": "Threat Actor / Official",
+            "confidence": "official-source",
+            "summary": "Official sanctions/source family for Somalia and Al-Shabaab context. Use for traceable actor background, not tactical attribution.",
+            "aoi": aoi,
+            "live": False,
+        },
+        {
+            "title": "US State Department Somalia travel advisory",
+            "source": "US Department of State",
+            "url": "https://travel.state.gov/content/travel/en/traveladvisories/traveladvisories/somalia-travel-advisory.html",
+            "published_utc": None,
+            "category": "Threat Actor / Security",
+            "confidence": "official-source",
+            "summary": "Official public security advisory that separately references Al-Shabaab and ISIS-Somalia risk context. Use as strategic safety context.",
+            "aoi": aoi,
+            "live": False,
+        },
+        {
+            "title": "EUAA Somalia security situation and main actors",
+            "source": "EUAA",
+            "url": "https://www.euaa.europa.eu/coi/somalia/2025/security-situation/12-armed-actors-and-relevant-developments/123-updated-list-main-actors",
+            "published_utc": None,
+            "category": "Threat Actor / Security",
+            "confidence": "source-register",
+            "summary": "Structured country-of-origin reporting on state and non-state actors, useful for separating actor types and geographic relevance.",
+            "aoi": aoi,
+            "live": False,
+        },
+        {
+            "title": "Crisis Group - Islamic State-Somalia: Responding to an Evolving Threat",
+            "source": "International Crisis Group",
+            "url": "https://www.crisisgroup.org/brf/africa/somalia/b201-islamic-state-somalia-responding-evolving-threat",
+            "published_utc": None,
+            "category": "Threat Actor / ISIS-Somalia",
+            "confidence": "source-register",
+            "summary": "Analytical source-register item for ISIS-Somalia / Islamic State-Somalia context. Usually more relevant to Puntland/Bari unless current reporting links it to the AOI.",
+            "aoi": aoi,
+            "live": False,
+        },
+        {
+            "title": "Critical Threats - Al-Shabaab area of operations",
+            "source": "Critical Threats",
+            "url": "https://www.criticalthreats.org/analysis/al-shabaabs-area-of-operations",
+            "published_utc": None,
+            "category": "Threat Actor / Al-Shabaab",
+            "confidence": "source-register",
+            "summary": "Public analytical source for Al-Shabaab operating geography and activity context. Use as a watch item, not a standalone decision source.",
+            "aoi": aoi,
+            "live": False,
+        },
+        {
+            "title": "Somalia Civil Aviation Authority eAIP - HCMM Aden Adde Intl",
+            "source": "SCAA eAIP",
+            "url": "https://aip.scaa.gov.so/eAIP/HC-AD-2.HCMM-en-GB.html",
+            "published_utc": None,
+            "category": "Aviation / Official",
+            "confidence": "official-source",
+            "summary": "Airport facts, procedures, local operating constraints and official aeronautical context for Aden Adde / HCMM.",
+            "aoi": aoi,
+            "live": False,
+        },
+        {
+            "title": "IFALPA/IFATCA - Unlawful Communication Interference within the Mogadishu FIR",
+            "source": "IFALPA / IFATCA",
+            "url": "https://ifatca.org/unlawful-communication-interference-within-the-mogadishu-fir/",
+            "published_utc": None,
+            "category": "RF / Communications",
+            "confidence": "source-register",
+            "summary": "Public aviation safety bulletin for unlawful VHF communications interference. Relevant to RF awareness but not proof of GNSS jamming.",
+            "aoi": aoi,
+            "live": False,
+        },
+    ]
+
+
+def _j2hf_query_terms(aoi: str) -> list[str]:
+    base = (aoi or _J2HF_DEFAULT_AOI).strip()
+    return [
+        f"Al-Shabaab Somalia Mogadishu Aden Adde security aviation {base}",
+        f"ISIS-Somalia OR Islamic State Somalia Puntland Mogadishu {base}",
+        f"Somalia Mogadishu airport security Al-Shabaab ISIS {base}",
+        f"Somalia conflict zone aviation Mogadishu FIR Al-Shabaab {base}",
+    ]
+
+
+def _j2hf_google_news_rss_url(query: str) -> str:
+    q = _j2hf_urlparse.quote(query)
+    return f"https://news.google.com/rss/search?q={q}&hl=en-GB&gl=GB&ceid=GB:en"
+
+
+def _j2hf_fetch_news_rss(query: str, limit: int = 10) -> list[dict[str, _J2HFAny]]:
+    url = _j2hf_google_news_rss_url(query)
+    req = _j2hf_urlrequest.Request(url, headers={"User-Agent": "EEI-LANTERN-J2/0.11.4a"})
+    try:
+        with _j2hf_urlrequest.urlopen(req, timeout=8) as resp:
+            raw = resp.read(750_000)
+    except Exception:
+        return []
+    try:
+        root = _j2hf_ET.fromstring(raw)
+    except Exception:
+        return []
+    out: list[dict[str, _J2HFAny]] = []
+    for item in root.findall(".//item"):
+        title = _j2hf_clean_text(item.findtext("title"))
+        link = _j2hf_clean_text(item.findtext("link"))
+        pub = _j2hf_pub_to_iso(item.findtext("pubDate"))
+        source_el = item.find("source")
+        source = _j2hf_clean_text(source_el.text if source_el is not None else "Google News")
+        desc = _j2hf_clean_text(item.findtext("description"))
+        if not title or not link:
+            continue
+        out.append({
+            "title": title,
+            "source": source or "Google News",
+            "url": link,
+            "published_utc": pub,
+            "category": _j2hf_category_for_text(title + " " + desc),
+            "confidence": "live-news",
+            "summary": desc[:360] if desc else "Live news/search result. Verify source details before briefing.",
+            "aoi": _J2HF_DEFAULT_AOI,
+            "live": True,
+        })
+        if len(out) >= int(limit):
+            break
+    return out
+
+
+def _j2hf_category_for_text(text: str) -> str:
+    t = (text or "").lower()
+    if any(k in t for k in ["isis", "islamic state", "daesh"]):
+        return "Threat Actor / ISIS-Somalia"
+    if any(k in t for k in ["al-shabaab", "al shabaab", "shabaab"]):
+        return "Threat Actor / Al-Shabaab"
+    if any(k in t for k in ["airport", "aviation", "airspace", "mogadishu fir", "advisory", "notam"]):
+        return "Aviation / Security"
+    if any(k in t for k in ["jamming", "spoofing", "gnss", "gps", "rf", "vhf"]):
+        return "GNSS/RF"
+    return "Security / Regional"
+
+
+def _j2hf_existing_news(aoi: str, live: bool, force: bool, limit: int) -> list[dict[str, _J2HFAny]]:
+    fn = globals().get("api_j2_news")
+    if callable(fn):
+        try:
+            payload = fn(aoi=aoi, live=live, force=force, limit=limit)  # type: ignore[misc]
+            return list(payload.get("articles") or [])
+        except TypeError:
+            try:
+                payload = fn(live=live, force=force, limit=limit)  # type: ignore[misc]
+                return list(payload.get("articles") or [])
+            except Exception:
+                return []
+        except Exception:
+            return []
+    return []
+
+
+def _j2hf_dedupe(items: list[dict[str, _J2HFAny]], limit: int) -> list[dict[str, _J2HFAny]]:
+    seen: set[str] = set()
+    out: list[dict[str, _J2HFAny]] = []
+    for item in items:
+        url = str(item.get("url") or "").strip()
+        title = _j2hf_clean_text(item.get("title"))
+        key = (url or title).lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        item = dict(item)
+        item.setdefault("category", _j2hf_category_for_text(title + " " + str(item.get("summary") or "")))
+        item.setdefault("confidence", "source-register")
+        item.setdefault("live", False)
+        out.append(item)
+        if len(out) >= int(limit):
+            break
+    return out
+
+
+def _j2hf_threat_articles(aoi: str, live: bool, force: bool, limit: int) -> list[dict[str, _J2HFAny]]:
+    live_items: list[dict[str, _J2HFAny]] = []
+    if live:
+        per_query = max(4, min(12, int(limit) // 3))
+        for query in _j2hf_query_terms(aoi):
+            live_items.extend(_j2hf_fetch_news_rss(query, limit=per_query))
+    existing = _j2hf_existing_news(aoi, live, force, max(int(limit), 20))
+    threatish_existing = []
+    for item in existing:
+        text = " ".join(str(item.get(k) or "") for k in ("title", "summary", "category", "source"))
+        cat = _j2hf_category_for_text(text)
+        if cat.startswith("Threat Actor") or "security" in cat.lower() or "aviation" in cat.lower():
+            copied = dict(item)
+            copied["category"] = cat if copied.get("category") in (None, "", "Security / Regional") else copied.get("category")
+            threatish_existing.append(copied)
+    return _j2hf_dedupe(live_items + threatish_existing + _j2hf_source_register(aoi), limit=max(int(limit), 8))
+
+
+def _j2hf_actor_catalog(aoi: str) -> list[dict[str, _J2HFAny]]:
+    return [
+        {
+            "actor": "Al-Shabaab",
+            "type": "Non-state armed group / insurgent-terrorist actor",
+            "area_relevance": "Primary south-central Somalia and Mogadishu watch line for airport-area security context.",
+            "current_assessment": "Monitor for attack reporting, indirect fire, IED/security incidents, checkpoints, airport-access disruption and wider Mogadishu security changes before task execution.",
+            "j2_relevance": "Primary actor watch for Aden Adde / Mogadishu operating context. Relevant to ground movement, permissions, force protection and airport-area restrictions.",
+            "aviation_rf_relevance": "Relevant to aviation/security posture. Do not attribute GNSS/RF interference to Al-Shabaab unless a cited source explicitly supports that attribution.",
+            "confidence": "SOURCE-LINKED",
+        },
+        {
+            "actor": "ISIS-Somalia / Islamic State Somalia / Daesh-Somalia",
+            "type": "Non-state armed group / terrorist actor",
+            "area_relevance": "Usually a Puntland/Bari/Golis/Cal Miskaad watch line unless current reporting links activity to Mogadishu or the AOI.",
+            "current_assessment": "Track current reporting separately from Al-Shabaab. Do not merge ISIS-Somalia reporting into the Mogadishu airport picture unless the source is geographically relevant.",
+            "j2_relevance": "Secondary actor watch. Important for Somalia threat context and external reporting, but must be geographically checked against the AOI.",
+            "aviation_rf_relevance": "Indirect security relevance. No automatic RF/GNSS attribution without explicit source support.",
+            "confidence": "SOURCE-LINKED",
+        },
+        {
+            "actor": "Somalia Federal Government / regional administrations / AUSSOM and security partners",
+            "type": "State/security operating context",
+            "area_relevance": "Permissions, checkpoints, cordons, military/security operations, airport access and official operating restrictions.",
+            "current_assessment": "Track official coordination notes, SCAA/eAIP/NOTAMs, local approvals and security-force activity affecting the worksite and airport access routes.",
+            "j2_relevance": "Not a hostile actor bucket. This is the state/security context required for safe and authorised operating decisions.",
+            "aviation_rf_relevance": "Direct relevance to operating permission, local restrictions and safety case controls.",
+            "confidence": "OFFICIAL/SOURCE-LINKED",
+        },
+        {
+            "actor": "External state / regional actors",
+            "type": "Regional state and proxy-context watch line",
+            "area_relevance": "Regional diplomatic, military or security activity may alter operating constraints or aviation/security posture.",
+            "current_assessment": "Use only source-linked reporting. Avoid hostile-state attribution unless the source explicitly makes that claim and is appropriate for the briefing level.",
+            "j2_relevance": "Contextual watch line for changes in the wider operating environment; not a default explanation for local RF anomalies.",
+            "aviation_rf_relevance": "Potential indirect relevance to airspace/security posture. No automatic link to GNSS/RF interference.",
+            "confidence": "LOW TO MEDIUM - SOURCE DEPENDENT",
+        },
+        {
+            "actor": "Unknown RF/GNSS interference source",
+            "type": "Unattributed technical/risk bucket",
+            "area_relevance": "Used when MOTH/GNSS anomalies exist but no source-supported actor attribution exists.",
+            "current_assessment": "Keep RF observations separate from actor attribution. Strong GNSS-band detections show RF risk; they do not identify who caused it.",
+            "j2_relevance": "Prevents unsupported attribution. Escalate only when technical evidence and source reporting support a specific claim.",
+            "aviation_rf_relevance": "Directly relevant to GNSS serviceability checks, receiver validation and RF risk reporting.",
+            "confidence": "TECHNICAL OBSERVATION ONLY",
+        },
+    ]
+
+
+def _j2hf_payload(aoi: str, live: bool, force: bool, limit: int) -> dict[str, _J2HFAny]:
+    articles = _j2hf_threat_articles(aoi, live, force, limit)
+    live_count = sum(1 for a in articles if bool(a.get("live")))
+    actors = _j2hf_actor_catalog(aoi)
+    al_count = sum(1 for a in articles if "shabaab" in str(a.get("title", "") + " " + a.get("summary", "")).lower())
+    isis_count = sum(1 for a in articles if any(k in str(a.get("title", "") + " " + a.get("summary", "")).lower() for k in ["isis", "islamic state", "daesh"]))
+    official_count = sum(1 for a in articles if "official" in str(a.get("confidence", "")).lower() or str(a.get("source", "")).lower() in {"easa", "easa czib", "un security council", "us department of state", "scaa eaip"})
+    confidence = "LIVE" if live_count else "SOURCE-REGISTER"
+    return {
+        "status": "ok",
+        "j2_api_version": _J2HF_VERSION,
+        "generated_utc": _j2hf_now(),
+        "aoi": aoi,
+        "confidence": confidence,
+        "live_attempted": bool(live),
+        "live_count": live_count,
+        "count": len(articles),
+        "message": "Live threat actor article feed refreshed." if live_count else "Live threat actor feed unavailable or empty; using source-register links.",
+        "actors": actors,
+        "articles": articles,
+        "source_log": [
+            {
+                "title": a.get("title"),
+                "source": a.get("source"),
+                "url": a.get("url"),
+                "category": a.get("category"),
+                "confidence": a.get("confidence"),
+                "published_utc": a.get("published_utc"),
+                "live": bool(a.get("live")),
+            }
+            for a in articles
+        ],
+        "brief_lines": [
+            f"Primary actor watch: Al-Shabaab remains the main Mogadishu / Aden Adde security-context watch line. Source-linked items in feed: {al_count}.",
+            f"Secondary actor watch: ISIS-Somalia / Islamic State Somalia is tracked separately and should be geographically checked before applying it to the AOI. Source-linked items in feed: {isis_count}.",
+            "State/security context: track SCAA/eAIP/NOTAMs, airport permission, checkpoint/cordon changes, and current security-force operations before task execution.",
+            "RF/GNSS attribution boundary: MOTH detections and receiver symptoms can indicate RF risk, but they do not identify an actor without separate source-supported attribution.",
+            f"Source basis: {len(articles)} article/source item(s), {live_count} live item(s), {official_count} official/source-register item(s).",
+        ],
+        "attribution_boundary": "Do not attribute GNSS jamming, spoofing, VHF interference, or strong RF detections to Al-Shabaab, ISIS-Somalia, a state actor, or any other actor unless a cited source explicitly supports that attribution. Keep RF observations and J2 actor assessment separated.",
+        "limitations": [
+            "This endpoint provides public-source J2 awareness and source links. It is not tactical targeting intelligence.",
+            "Live news search can fail because of network, proxy, or provider restrictions; source-register links remain available offline.",
+            "Actor activity, airport restrictions and official advisories change quickly; refresh before briefing and verify critical points at source.",
+        ],
+    }
+
+
+@app.get("/api/j2/threat-actors")  # type: ignore[name-defined]
+def api_j2_threat_actors_hotfix(
+    aoi: str = _J2HF_DEFAULT_AOI,
+    live: bool = True,
+    force: bool = False,
+    limit: int = _J2HFQuery(default=30, ge=1, le=80),
+) -> dict[str, _J2HFAny]:
+    return _j2hf_payload(aoi=aoi, live=bool(live), force=bool(force), limit=int(limit))
+
+
+@app.get("/api/j2/threat_actors")  # type: ignore[name-defined]
+def api_j2_threat_actors_hotfix_alias(
+    aoi: str = _J2HF_DEFAULT_AOI,
+    live: bool = True,
+    force: bool = False,
+    limit: int = _J2HFQuery(default=30, ge=1, le=80),
+) -> dict[str, _J2HFAny]:
+    return api_j2_threat_actors_hotfix(aoi=aoi, live=live, force=force, limit=limit)
+
+
+@app.get("/api/j2/threat-news")  # type: ignore[name-defined]
+def api_j2_threat_news_hotfix(
+    aoi: str = _J2HF_DEFAULT_AOI,
+    live: bool = True,
+    force: bool = False,
+    limit: int = _J2HFQuery(default=30, ge=1, le=80),
+) -> dict[str, _J2HFAny]:
+    payload = api_j2_threat_actors_hotfix(aoi=aoi, live=live, force=force, limit=limit)
+    return {
+        "status": "ok",
+        "j2_api_version": _J2HF_VERSION,
+        "generated_utc": payload.get("generated_utc"),
+        "aoi": aoi,
+        "live_count": payload.get("live_count", 0),
+        "count": payload.get("count", 0),
+        "articles": payload.get("articles", []),
+        "source_log": payload.get("source_log", []),
+    }
+
+# ---- end EEI LANTERN v0.11.4a J2 Threat Actors endpoint hotfix ----
