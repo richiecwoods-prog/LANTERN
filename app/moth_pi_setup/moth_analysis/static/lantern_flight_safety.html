@@ -1,0 +1,879 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LANTERN | Flight Safety Brief v0.10.3</title>
+  <style>
+    :root{
+      --bg:#0b1220;
+      --panel:#101a2b;
+      --panel-2:#16243a;
+      --text:#e8eef7;
+      --muted:#9fb0c5;
+      --line:#2b3a52;
+      --blue:#24669b;
+      --good:#1f7a3a;
+      --amber:#d4a017;
+      --orange:#d46a1f;
+      --bad:#b42318;
+      --unknown:#7a7f88;
+      --white:#ffffff;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif;line-height:1.4}
+    header{padding:18px 24px;border-bottom:1px solid var(--line);background:#07101e;display:flex;gap:18px;align-items:flex-end;justify-content:space-between;flex-wrap:wrap}
+    h1{margin:0;font-size:24px;letter-spacing:.03em}
+    h2{margin:0 0 10px 0;font-size:17px;color:#f5f7fb}
+    h3{margin:0 0 8px 0;font-size:14px;color:#dce7f5}
+    p{margin:6px 0}.small{font-size:12px;color:var(--muted)}
+    .subtitle{color:var(--muted);font-size:13px;margin-top:4px}
+    .wrap{padding:18px 24px;max-width:1600px;margin:0 auto}
+    .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;box-shadow:0 8px 20px rgba(0,0,0,.16)}
+    .span-12{grid-column:span 12}.span-8{grid-column:span 8}.span-7{grid-column:span 7}.span-6{grid-column:span 6}.span-5{grid-column:span 5}.span-4{grid-column:span 4}.span-3{grid-column:span 3}
+    @media(max-width:1100px){.span-8,.span-7,.span-6,.span-5,.span-4,.span-3{grid-column:span 12}}
+    label{display:block;font-size:12px;color:var(--muted);margin:0 0 4px 0}
+    input,select,button{border-radius:8px;border:1px solid var(--line);background:#0c1626;color:var(--text);padding:9px 10px;font-size:13px;width:100%}
+    button{cursor:pointer;background:#1d4f7a;border-color:#316990;font-weight:700;letter-spacing:.02em}
+    button:hover{background:#24669b}.controls{display:grid;grid-template-columns:repeat(8,1fr);gap:10px;align-items:end}.controls>div{grid-column:span 1}.controls>.wide{grid-column:span 2}
+    @media(max-width:900px){.controls{grid-template-columns:repeat(2,1fr)}.controls>div,.controls>.wide{grid-column:span 1}}
+    .status{font-size:22px;font-weight:800;letter-spacing:.02em;margin-bottom:8px}.status.good{color:#7ee29a}.status.check{color:#ffd166}.status.bad{color:#ff8f78}.status.none{color:#c5cbd5}
+    .metric{display:flex;justify-content:space-between;gap:12px;border-top:1px solid var(--line);padding:8px 0;font-size:13px}.metric:first-of-type{border-top:0}.metric b{font-size:14px;color:#fff;text-align:right}
+    .pill{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:700;background:#1b2b45;border:1px solid var(--line);margin:2px 4px 2px 0}.dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:6px}
+    canvas{width:100%;height:840px;background:#e9e7e7;border-radius:10px;border:1px solid #49515f;display:block}.canvas-shell{background:#d7d4d5;padding:10px;border-radius:12px}
+    table{width:100%;border-collapse:collapse;font-size:12px}th,td{border-bottom:1px solid var(--line);padding:8px;text-align:left;vertical-align:top}th{color:#cfe1f6;background:#132035;position:sticky;top:0}tbody tr:hover{background:#15243a}.right{text-align:right}.nowrap{white-space:nowrap}
+    .list{margin:0;padding-left:18px}.list li{margin:5px 0}.muted{color:var(--muted)}
+    .legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.legend span{display:inline-flex;align-items:center;gap:6px;color:#d8e5f5;font-size:12px}.swatch{width:18px;height:10px;border-radius:2px;display:inline-block}
+    .report-lines{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:8px}.report-line{border:1px solid var(--line);border-radius:8px;background:#0d1727;padding:8px;font-size:12px;color:#d8e5f5}
+    .badge{display:inline-flex;align-items:center;border-radius:999px;padding:3px 8px;font-size:11px;font-weight:800;letter-spacing:.02em;border:1px solid var(--line);white-space:nowrap}
+    .badge.high{background:#4a1411;color:#ffd1c8;border-color:#9c352a}.badge.context{background:#42300b;color:#ffe4a3;border-color:#b7791f}.badge.check{background:#253454;color:#d8e7ff;border-color:#4b6fa5}.badge.watch{background:#173626;color:#c9f6d7;border-color:#2f7a4d}.badge.low{background:#13251a;color:#c9f6d7;border-color:#2f7a4d}.badge.none{background:#202838;color:#c5cbd5;border-color:#3a4658}
+    .top-links a{color:#dcefff;text-decoration:none;border:1px solid var(--line);padding:7px 9px;border-radius:8px;margin-left:6px;font-size:12px;background:#101a2b}.top-links a:hover{background:#1a2d48}
+    details{border:1px solid var(--line);border-radius:10px;padding:10px;background:#0d1727}summary{cursor:pointer;font-weight:700}.reference-img{max-width:100%;border-radius:8px;border:1px solid var(--line);background:#fff;margin-top:10px}
+    .error{color:#ffb4a6;background:#381a18;border:1px solid #7f2a20;padding:10px;border-radius:8px;white-space:pre-wrap}.okline{color:#b9f6ca}.print-only{display:none}
+    @media print{body{background:#fff;color:#111}.wrap,header{padding:8px;max-width:none}.card{box-shadow:none;background:#fff;color:#111;border-color:#aaa}.subtitle,.small,.muted,label{color:#333}button,.top-links,.controls,.no-print{display:none!important}.print-only{display:block}canvas{border-color:#888}th{background:#eee;color:#111}.metric{border-color:#ccc}}
+  </style>
+  <link rel="stylesheet" href="/static/platform_shell.css?v=0127" />
+</head>
+<body>
+  <header>
+    <div>
+      <h1>LANTERN</h1>
+      <div class="subtitle">Flight Safety Brief v0.10.3 | Launch Analysis and Network Telemetry Evaluation for RF Navigation</div>
+    </div>
+    <div class="top-links no-print">
+      <a href="/app?v=0122">Home</a>
+      <a href="/static/launch_analysis.html?v=075">Analyst Launch RF</a>
+      <a href="/static/index.html?v=010">Map / Candidates</a>
+      <a href="/api/lantern/health" target="_blank">API Health</a>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="card span-12 no-print" style="margin-bottom:14px">
+      <h2>Filters</h2>
+      <div class="controls">
+        <div class="wide"><label>Collection IDs, comma-separated</label><input id="collectionIds" placeholder="blank = all loaded scans" /></div>
+        <div class="wide"><label>Start UTC</label><input id="startUtc" placeholder="2026-05-24T08:00:00Z" /></div>
+        <div class="wide"><label>End UTC</label><input id="endUtc" placeholder="2026-05-24T12:00:00Z" /></div>
+        <div><label>Bin MHz</label><input id="binMhz" type="number" min="0.5" max="25" step="0.5" value="2" /></div>
+        <div><label>Spike dBm</label><input id="spikeDbm" type="number" step="1" value="-60" /></div>
+        <div><label>&nbsp;</label><button id="refreshBtn">Refresh brief</button></div>
+      </div>
+      <p class="small">Green means quieter/clearer observed RF burden. Red means busier/noisier/spike-prone. This is not a flight authorisation.</p>
+    </section>
+
+    <section id="errorBox" class="error" style="display:none;margin-bottom:14px"></section>
+
+    <section class="grid">
+      <div class="card span-4">
+        <h2>RF Readiness</h2>
+        <div id="readinessStatus" class="status none">Loading</div>
+        <p id="readinessReason" class="muted">Waiting for LANTERN data.</p>
+        <div class="metric"><span>Confidence</span><b id="confidenceLabel">—</b></div>
+        <div class="metric"><span>L-band events</span><b id="totalEvents">—</b></div>
+        <div class="metric"><span>Scans</span><b id="scanCount">—</b></div>
+        <div class="metric"><span>Data span</span><b id="dataSpan">—</b></div>
+      </div>
+
+      <div class="card span-4">
+        <h2>Lowest observed RF-burden GNSS option</h2>
+        <div id="bestBand" class="status none">—</div>
+        <p id="bestBandReason" class="muted">No band ranking yet.</p>
+        <div class="metric"><span>Clearance score</span><b id="bestClearance">—</b></div>
+        <div class="metric"><span>Events / spikes</span><b id="bestEvents">—</b></div>
+        <div class="metric"><span>Max dBm</span><b id="bestDbm">—</b></div>
+      </div>
+
+      <div class="card span-4">
+        <h2>Best observed launch timing</h2>
+        <div id="launchStatus" class="status none">—</div>
+        <p id="launchReason" class="muted">Launch-window analysis will appear when available.</p>
+        <div class="metric"><span>UTC window</span><b id="launchWindow">—</b></div>
+        <div class="metric"><span>GNSS events / spikes</span><b id="launchEvents">—</b></div>
+        <div class="metric"><span>Score</span><b id="launchScore">—</b></div>
+      </div>
+
+      <div class="card span-12">
+        <h2>Signal interpretation for reporting</h2>
+        <div id="signalContextStatus" class="status none">—</div>
+        <p id="signalContextSummary" class="muted">A strong dBm value is interpreted by frequency context, persistence and receiver symptoms, not by strength alone.</p>
+        <div class="grid" style="margin-top:8px">
+          <div class="span-3"><div class="metric"><span>Strong-spike threshold</span><b id="signalSpike">—</b></div></div>
+          <div class="span-3"><div class="metric"><span>Strong GNSS peak bins</span><b id="signalStrongGnss">—</b></div></div>
+          <div class="span-3"><div class="metric"><span>Strong non-GNSS peak bins</span><b id="signalStrongOther">—</b></div></div>
+          <div class="span-3"><div class="metric"><span>GNSS reference</span><b id="signalPowerRef">—</b></div></div>
+        </div>
+        <p id="signalSimpleRule" class="small">Simple rule: a strong MOTH reading becomes a GNSS concern when it is in or near a GNSS band, is wideband or persistent, or correlates with receiver degradation.</p>
+        <div id="reportingLines" class="report-lines"></div>
+        <details style="margin-top:10px">
+          <summary>Next checks for a strong detection</summary>
+          <ul id="reportingChecklist" class="list" style="margin-top:8px"></ul>
+        </details>
+      </div>
+
+      <div class="card span-12">
+        <h2>GNSS L-band Clearance View</h2>
+        <div class="canvas-shell"><canvas id="spectrumCanvas"></canvas></div>
+        <div class="legend">
+          <span><i class="swatch" style="background:#1f7a3a"></i>Quietest / clearer observed</span>
+          <span><i class="swatch" style="background:#d4a017"></i>Check / validate</span>
+          <span><i class="swatch" style="background:#d46a1f"></i>Busy / caution</span>
+          <span><i class="swatch" style="background:#b42318"></i>Avoid if possible</span>
+          <span><i class="swatch" style="background:#6386c3"></i>GNSS band blocks remain visible</span>
+        </div>
+        <p class="small">RF data is plotted against the left dBm axis. Bars show strongest observed detection per frequency bin, with average dBm markers where available. GNSS constellation/service blocks are drawn as neat frequency-aligned background/reference lanes below the dBm plot.</p>
+      </div>
+
+      <div class="card span-7">
+        <h2>Constellation / band ranking</h2>
+        <div style="overflow:auto;max-height:470px">
+          <table id="rankingTable">
+            <thead><tr><th>Rank</th><th>Band</th><th>Status</th><th class="right">Clearance</th><th class="right">Events</th><th class="right">Spikes</th><th class="right">Max dBm</th><th>Concern</th><th>Reason</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card span-5">
+        <h2>Peak traffic</h2>
+        <div style="overflow:auto;max-height:470px">
+          <table id="peakTable">
+            <thead><tr><th>Freq MHz</th><th class="right">Burden</th><th class="right">Events</th><th class="right">Spikes</th><th class="right">Max dBm</th><th>Concern</th><th>Overlaps</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card span-6">
+        <h2>Still required before use</h2>
+        <ul id="stillRequired" class="list"></ul>
+      </div>
+
+      <div class="card span-6">
+        <h2>Limitations</h2>
+        <ul id="limitations" class="list"></ul>
+      </div>
+
+      <div class="card span-12 no-print">
+        <details>
+          <summary>Reference visual style: source 110.jpeg</summary>
+          <p class="small">This image is copied into the static folder by the v0.10 patch. It is used as the visual reference for lower/upper L-band, ARNS/RNSS/SAR blocks, and GNSS constellation bands.</p>
+          <img class="reference-img" src="/static/gnss_lband_reference_110.jpeg" alt="L-band GNSS reference style" />
+        </details>
+      </div>
+    </section>
+  </main>
+
+<script>
+const $ = id => document.getElementById(id);
+let latestClearance = null;
+let latestBrief = null;
+let latestReporting = null;
+
+function qs(){
+  const params = new URLSearchParams(location.search);
+  for(const [key,id] of [["collection_ids","collectionIds"],["start_utc","startUtc"],["end_utc","endUtc"],["freq_bin_mhz","binMhz"],["spike_dbm","spikeDbm"]]){
+    if(params.has(key)) $(id).value = params.get(key);
+  }
+}
+
+function buildParams(extra={}){
+  const p = new URLSearchParams();
+  const ids = $("collectionIds").value.trim();
+  const st = $("startUtc").value.trim();
+  const en = $("endUtc").value.trim();
+  if(ids) p.set("collection_ids", ids);
+  if(st) p.set("start_utc", st);
+  if(en) p.set("end_utc", en);
+  p.set("freq_bin_mhz", $("binMhz").value || "2");
+  p.set("spike_dbm", $("spikeDbm").value || "-60");
+  for(const [k,v] of Object.entries(extra)) if(v !== undefined && v !== null) p.set(k, v);
+  return p;
+}
+
+async function getJSON(path, params){
+  const res = await fetch(path + (params ? `?${params}` : ""), {cache:"no-store"});
+  if(!res.ok) throw new Error(`${res.status} ${res.statusText}: ${await res.text()}`);
+  return await res.json();
+}
+
+function statusClass(status){
+  const s = String(status||"").toUpperCase();
+  if(s.includes("SUPPORTS") || s.includes("RECOMMENDED") || s.includes("QUIETEST") || s.includes("LOW RF")) return "good";
+  if(s.includes("CHECK") || s.includes("BEST") || s.includes("VERIFY") || s.includes("VIABLE")) return "check";
+  if(s.includes("DOES NOT") || s.includes("AVOID") || s.includes("BUSY")) return "bad";
+  return "none";
+}
+
+function setStatus(el, text){
+  el.textContent = text || "—";
+  el.className = "status " + statusClass(text);
+}
+
+function fmt(v, suffix=""){
+  if(v === null || v === undefined || v === "") return "—";
+  if(typeof v === "number") return Number.isInteger(v) ? `${v}${suffix}` : `${v.toFixed(1)}${suffix}`;
+  return `${v}${suffix}`;
+}
+
+function escapeHtml(value){
+  return String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[ch]));
+}
+
+function concernClass(level){
+  const s = String(level || "").toUpperCase();
+  if(s.includes("HIGH")) return "high";
+  if(s.includes("CONTEXT")) return "context";
+  if(s.includes("CHECK")) return "check";
+  if(s.includes("WATCH")) return "watch";
+  if(s.includes("LOW")) return "low";
+  return "none";
+}
+
+function concernBadge(item){
+  const level = item?.concern_level || "NO DATA";
+  return `<span class="badge ${concernClass(level)}">${escapeHtml(level)}</span>`;
+}
+
+function bandInterpretation(label){
+  const target = String(label || "").toLowerCase();
+  return (latestReporting?.top_level?.band_interpretations || []).find(x => String(x.label || "").toLowerCase() === target) || null;
+}
+
+function peakInterpretation(p){
+  const f = Number(p?.freq_center_mhz);
+  if(!Number.isFinite(f)) return null;
+  return (latestReporting?.top_level?.peak_interpretations || []).find(x => Math.abs(Number(x.freq_center_mhz) - f) < 0.001) || null;
+}
+
+function renderReporting(data, reporting){
+  const top = reporting?.top_level || {};
+  setStatus($("signalContextStatus"), top.headline || "Reporting interpretation");
+  $("signalContextSummary").textContent = top.summary || "Reporting interpretation is available once LANTERN receives MOTH L-band data.";
+  $("signalSpike").textContent = fmt(reporting?.spike_dbm ?? data?.spike_dbm ?? -60, " dBm");
+  $("signalStrongGnss").textContent = fmt(top.strong_gnss_peak_count);
+  $("signalStrongOther").textContent = fmt(top.strong_non_gnss_peak_count);
+  $("signalPowerRef").textContent = reporting?.reference?.approx_gnss_received_power_dbm !== undefined ? `${reporting.reference.approx_gnss_received_power_dbm} dBm` : "approx -130 dBm";
+  $("signalSimpleRule").textContent = reporting?.simple_rule || "A strong MOTH reading becomes a GNSS concern when it is in or near a GNSS band, is wideband or persistent, or correlates with receiver degradation.";
+
+  const lines = $("reportingLines");
+  lines.innerHTML = "";
+  const reportingLines = reporting?.reporting_lines || [
+    "A -60 dBm reading is a strong received RF detection.",
+    "It is only a GNSS concern when it is in/near a GNSS band or correlates with receiver degradation.",
+    "Strong out-of-band activity is RF context, not automatically a GPS issue.",
+    "Use receiver fix, satellite count, HDOP/PDOP, C/N0 and independent checks before briefing serviceability."
+  ];
+  reportingLines.slice(0,6).forEach(line => {
+    const div = document.createElement("div");
+    div.className = "report-line";
+    div.textContent = line;
+    lines.appendChild(div);
+  });
+
+  const checks = $("reportingChecklist");
+  checks.innerHTML = "";
+  (reporting?.next_checks || []).forEach(x => {
+    const li = document.createElement("li");
+    li.textContent = x;
+    checks.appendChild(li);
+  });
+}
+
+function renderSummary(data, brief){
+  const r = data.readiness || {};
+  setStatus($("readinessStatus"), r.status || "NO DATA");
+  $("readinessReason").textContent = r.reason || r.plain_language || "No readiness reason available.";
+  $("confidenceLabel").textContent = `${data.confidence?.label || "—"} (${fmt(data.confidence?.score_0_100)}/100)`;
+  $("totalEvents").textContent = fmt(data.total_lband_events);
+  $("scanCount").textContent = fmt(data.scan_count);
+  $("dataSpan").textContent = data.confidence?.duration_hours === null || data.confidence?.duration_hours === undefined ? "—" : `${data.confidence.duration_hours} h`;
+
+  const best = (data.band_scores || [])[0] || {};
+  setStatus($("bestBand"), best.label || "NO RANKING");
+  $("bestBandReason").textContent = best.status ? `${best.status}. ${best.plain_reason || ""}` : "No band ranking available.";
+  $("bestClearance").textContent = fmt(best.clearance_score, "/100");
+  $("bestEvents").textContent = best.event_count === undefined ? "—" : `${best.event_count} / ${best.spike_count || 0}`;
+  $("bestDbm").textContent = fmt(best.max_dbm, " dBm");
+
+  const win = brief?.best_launch_window;
+  if(win){
+    setStatus($("launchStatus"), win.recommendation_type || "RANKED");
+    $("launchReason").textContent = win.interpretation || (win.reasons || []).join("; ") || "Ranked by launch-window endpoint.";
+    $("launchWindow").textContent = `${win.start_utc || "—"} to ${win.end_utc || "—"}`;
+    $("launchEvents").textContent = `${fmt(win.gnss_event_count)} / ${fmt(win.gnss_spike_count)}`;
+    $("launchScore").textContent = fmt(win.score_0_100, "/100");
+  }else{
+    setStatus($("launchStatus"), "NOT RANKED");
+    $("launchReason").textContent = brief?.launch_error || "No launch-window result was returned for the selected filters.";
+    $("launchWindow").textContent = "—"; $("launchEvents").textContent = "—"; $("launchScore").textContent = "—";
+  }
+}
+
+function renderTables(data){
+  const rankBody = $("rankingTable").querySelector("tbody");
+  rankBody.innerHTML = "";
+  (data.band_scores || []).forEach((b, idx)=>{
+    const tr = document.createElement("tr");
+    const bCtx = bandInterpretation(b.label);
+    const reason = bCtx?.briefing || b.plain_reason || "";
+    tr.innerHTML = `<td class="nowrap">${idx+1}</td><td><span class="pill"><i class="dot" style="background:${b.display_color || '#888'}"></i>${escapeHtml(b.label)}</span><div class="small">${escapeHtml(b.min_mhz)}-${escapeHtml(b.max_mhz)} MHz</div></td><td>${escapeHtml(b.status || "—")}</td><td class="right">${fmt(b.clearance_score)}</td><td class="right">${fmt(b.event_count)}</td><td class="right">${fmt(b.spike_count)}</td><td class="right">${fmt(b.max_dbm)}</td><td>${concernBadge(bCtx)}</td><td>${escapeHtml(reason)}</td>`;
+    rankBody.appendChild(tr);
+  });
+
+  const peakBody = $("peakTable").querySelector("tbody");
+  peakBody.innerHTML = "";
+  (data.peak_traffic || []).forEach((p)=>{
+    const tr = document.createElement("tr");
+    const pCtx = peakInterpretation(p);
+    tr.innerHTML = `<td class="nowrap">${fmt(p.freq_center_mhz)}</td><td class="right">${fmt(p.rf_burden_score)}</td><td class="right">${fmt(p.event_count)}</td><td class="right">${fmt(p.spike_count)}</td><td class="right">${fmt(p.max_dbm)}</td><td>${concernBadge(pCtx)}</td><td>${escapeHtml((p.overlaps || []).join(", ") || "—")}</td>`;
+    peakBody.appendChild(tr);
+  });
+
+  for(const [id,items] of [["stillRequired", data.still_required || []],["limitations", data.limitations || []]]){
+    const ul = $(id); ul.innerHTML = "";
+    items.forEach(x=>{const li=document.createElement("li"); li.textContent=x; ul.appendChild(li);});
+  }
+}
+
+function setupCanvas(canvas){
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.max(1120, Math.floor(rect.width * dpr));
+  canvas.height = Math.floor(840 * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  return {ctx, w: canvas.width/dpr, h: canvas.height/dpr};
+}
+
+function drawArrow(ctx, x1, y, x2, label){
+  ctx.strokeStyle = "#111";
+  ctx.fillStyle = "#111";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x1,y);
+  ctx.lineTo(x2,y);
+  ctx.stroke();
+  const ah = 8;
+  ctx.beginPath();
+  ctx.moveTo(x1,y);
+  ctx.lineTo(x1+ah,y-ah/1.4);
+  ctx.lineTo(x1+ah,y+ah/1.4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(x2,y);
+  ctx.lineTo(x2-ah,y-ah/1.4);
+  ctx.lineTo(x2-ah,y+ah/1.4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.font = "bold 17px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "bottom";
+  ctx.fillText(label, (x1+x2)/2, y-10);
+}
+
+function drawRoundRect(ctx,x,y,w,h,r,fill,stroke){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.lineTo(x+w-r,y);
+  ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r);
+  ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h);
+  ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r);
+  ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.closePath();
+  if(fill){ctx.fillStyle=fill;ctx.fill();}
+  if(stroke){ctx.strokeStyle=stroke;ctx.stroke();}
+}
+
+function drawAxisLabel(ctx, text, x, y){
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(-Math.PI/2);
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+}
+
+function alphaColour(colour, alpha){
+  if(colour.startsWith("rgba")) return colour.replace(/,[^,]+\)$/g, `,${alpha})`);
+  if(colour.startsWith("#")){
+    const n = parseInt(colour.slice(1), 16);
+    const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+  return colour;
+}
+
+function drawTextFit(ctx, text, x, y, w, h, opts={}){
+  if(w < 7 || h < 7) return;
+  const minFont = opts.minFont || 7;
+  let size = opts.size || 12;
+  const weight = opts.weight || "700";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  while(size > minFont){
+    ctx.font = `${weight} ${size}px Arial`;
+    if(ctx.measureText(text).width <= Math.max(8, w - 6)) break;
+    size -= 1;
+  }
+  if(ctx.measureText(text).width > Math.max(10, w - 4)){
+    ctx.save();
+    ctx.translate(x + w/2, y + h/2);
+    ctx.rotate(-Math.PI/2);
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+    return;
+  }
+  ctx.fillText(text, x + w/2, y + h/2 + 0.5);
+}
+
+// Reference X anchors were taken from the supplied 110.jpeg diagram so the
+// drawn blocks sit on the same brackets that the customer sees in that image.
+const REF_FREQ_X = [
+  {f:1100.00, x:300.0, label:"1100"},
+  {f:1164.00, x:358.5, label:"1164"},
+  {f:1176.45, x:423.0, label:"1176.45"},
+  {f:1189.00, x:485.5, label:"1189"},
+  {f:1207.14, x:549.5, label:"1207.14"},
+  {f:1214.00, x:612.5, label:"1214"},
+  {f:1215.00, x:627.5, label:"1215"},
+  {f:1237.00, x:730.0, label:"1237"},
+  {f:1239.60, x:754.5, label:"1239.6"},
+  {f:1254.00, x:856.0, label:"1254"},
+  {f:1260.00, x:890.5, label:"1260"},
+  {f:1268.52, x:987.5, label:"1268.52"},
+  {f:1278.75, x:1017.5, label:"1278.75"},
+  {f:1300.00, x:1144.5, label:"1300"},
+  {f:1544.00, x:1208.5, label:"1544"},
+  {f:1545.00, x:1222.5, label:"1545"},
+  {f:1559.00, x:1266.5, label:"1559"},
+  {f:1563.00, x:1312.5, label:"1563"},
+  {f:1575.42, x:1376.5, label:"1575.42"},
+  {f:1587.00, x:1440.5, label:"1587"},
+  {f:1591.00, x:1486.5, label:"1591"},
+  {f:1593.00, x:1516.5, label:"1593"},
+  {f:1610.00, x:1602.0, label:"1610"},
+  {f:1650.00, x:1660.0, label:"1650"},
+];
+
+const REF_EDGE_TICKS = [1164,1189,1214,1215,1237,1239.6,1254,1260,1300,1544,1545,1559,1563,1587,1591,1593,1610];
+
+const REF_SERVICE_BLOCKS = [
+  {label:"ARNS", x0:325,  x1:628,  y0:101, y1:162, color:"rgba(88,112,174,.72)", text:"#fff"},
+  {label:"RNSS", x0:342,  x1:612,  y0:160, y1:222, color:"rgba(126,108,112,.72)", text:"#fff"},
+  {label:"RNSS", x0:612,  x1:890,  y0:159, y1:228, color:"rgba(126,108,112,.72)", text:"#fff"},
+  {label:"RNSS", x0:890,  x1:1145, y0:159, y1:228, color:"rgba(126,108,112,.72)", text:"#fff"},
+  {label:"ARNS", x0:1267, x1:1602, y0:101, y1:161, color:"rgba(88,112,174,.72)", text:"#fff"},
+  {label:"RNSS", x0:1267, x1:1602, y0:154, y1:228, color:"rgba(126,108,112,.72)", text:"#fff"},
+];
+
+const REF_SIGNAL_BLOCKS = [
+  {family:"GPS",         signal:"L5",   x0:361,  x1:486,  y0:352, y1:407, color:"#ffe25a", text:"#111"},
+  {family:"Galileo",     signal:"E5a",  x0:359,  x1:486,  y0:290, y1:349, color:"#4d83c2", text:"#fff"},
+  {family:"Galileo",     signal:"E5b",  x0:486,  x1:613,  y0:290, y1:349, color:"#4d83c2", text:"#fff"},
+  {family:"BeiDou",      signal:"B2",   x0:491,  x1:609,  y0:230, y1:290, color:"#d698c5", text:"#111"},
+  {family:"GLONASS",     signal:"G3",   x0:485,  x1:613,  y0:351, y1:409, color:"#ef7f33", text:"#111"},
+  {family:"GPS",         signal:"L2",   x0:630,  x1:756,  y0:350, y1:407, color:"#ffe25a", text:"#111"},
+  {family:"GLONASS",     signal:"G2",   x0:730,  x1:856,  y0:341, y1:408, color:"#ef7f33", text:"#111"},
+  {family:"Galileo",     signal:"E6",   x0:890,  x1:1145, y0:290, y1:409, color:"#4d83c2", text:"#fff"},
+  {family:"BeiDou",      signal:"B3",   x0:928,  x1:1047, y0:230, y1:290, color:"#d698c5", text:"#111"},
+  {family:"Galileo SAR", signal:"SAR",  x0:1208, x1:1224, y0:290, y1:409, color:"#9ed2c4", text:"#111"},
+  {family:"BeiDou",      signal:"B1",   x0:1266, x1:1315, y0:230, y1:290, color:"#d698c5", text:"#111"},
+  {family:"Galileo",     signal:"E1",   x0:1266, x1:1488, y0:290, y1:408, color:"#4d83c2", text:"#fff"},
+  {family:"GPS",         signal:"L1",   x0:1316, x1:1438, y0:352, y1:407, color:"#ffe25a", text:"#111"},
+  {family:"BeiDou",      signal:"B1-2", x0:1440, x1:1489, y0:230, y1:290, color:"#d698c5", text:"#111"},
+  {family:"GLONASS",     signal:"G1",   x0:1518, x1:1601, y0:342, y1:408, color:"#ef7f33", text:"#111"},
+];
+
+function drawSpectrum(data){
+  const {ctx,w,h} = setupCanvas($("spectrumCanvas"));
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle="#eeecec";
+  ctx.fillRect(0,0,w,h);
+
+  const margin = {l:104, r:34, t:30, b:162};
+  const chart = {
+    left: margin.l,
+    right: w - margin.r,
+    refXMin: 300,
+    refXMax: 1660,
+    refYMin: 42,
+    refYMax: 418,
+    refTop: 32,
+    refH: 286,
+  };
+  chart.scaleX = (chart.right - chart.left) / (chart.refXMax - chart.refXMin);
+  chart.scaleY = chart.refH / (chart.refYMax - chart.refYMin);
+
+  function refX(x){ return chart.left + (Number(x) - chart.refXMin) * chart.scaleX; }
+  function refY(y){ return chart.refTop + (Number(y) - chart.refYMin) * chart.scaleY; }
+  function refW(x0,x1){ return Math.max(1, Math.abs(refX(x1) - refX(x0))); }
+  function refH(y0,y1){ return Math.max(1, Math.abs(refY(y1) - refY(y0))); }
+  function freqToRefX(mhz){
+    const f = Number(mhz);
+    const pts = REF_FREQ_X;
+    if(f <= pts[0].f){
+      const a = pts[0], b = pts[1];
+      return a.x + (f - a.f) * (b.x - a.x) / (b.f - a.f);
+    }
+    for(let i=0;i<pts.length-1;i++){
+      const a = pts[i], b = pts[i+1];
+      if(f >= a.f && f <= b.f){
+        return a.x + (f - a.f) * (b.x - a.x) / (b.f - a.f);
+      }
+    }
+    const a = pts[pts.length-2], b = pts[pts.length-1];
+    return a.x + (f - a.f) * (b.x - a.x) / (b.f - a.f);
+  }
+  function xMap(mhz){ return refX(freqToRefX(mhz)); }
+  function bandRectFreq(min,max){
+    const x1 = xMap(min), x2 = xMap(max);
+    return [Math.min(x1,x2), Math.max(1.5, Math.abs(x2-x1))];
+  }
+  function blockRectRef(b){
+    const x = refX(b.x0), y = refY(b.y0);
+    return [x, y, refW(b.x0,b.x1), refH(b.y0,b.y1)];
+  }
+
+  // Exact visual band plan from 110.jpeg, recreated as a reference layer.
+  ctx.fillStyle="#e6e1e3";
+  ctx.fillRect(chart.left, refY(54), chart.right-chart.left, refY(418)-refY(54));
+  ctx.strokeStyle="rgba(0,0,0,.12)";
+  ctx.strokeRect(chart.left, refY(54), chart.right-chart.left, refY(418)-refY(54));
+
+  drawArrow(ctx, refX(310), refY(70), refX(1145), "Lower L-band");
+  drawArrow(ctx, refX(1267), refY(70), refX(1602), "Upper L-band");
+
+  for(const b of REF_SERVICE_BLOCKS){
+    const [x,y,bw,bh] = blockRectRef(b);
+    ctx.fillStyle = b.color;
+    ctx.fillRect(x,y,bw,bh);
+    ctx.strokeStyle="rgba(0,0,0,.12)";
+    ctx.strokeRect(x,y,bw,bh);
+    ctx.fillStyle = b.text;
+    drawTextFit(ctx, b.label, x,y,bw,bh, {size:15, minFont:10, weight:"700"});
+  }
+
+  for(const b of REF_SIGNAL_BLOCKS){
+    const [x,y,bw,bh] = blockRectRef(b);
+    ctx.fillStyle = b.color;
+    ctx.fillRect(x,y,bw,bh);
+    ctx.strokeStyle="rgba(0,0,0,.16)";
+    ctx.strokeRect(x,y,bw,bh);
+    ctx.fillStyle = b.text;
+    drawTextFit(ctx, b.signal, x,y,bw,bh, {size:15, minFont:8, weight:"700"});
+  }
+
+  // Black baseline and reference bracket dividers.
+  const baseY = refY(409);
+  ctx.strokeStyle="#111";
+  ctx.lineWidth=2;
+  ctx.beginPath();
+  ctx.moveTo(refX(300), baseY);
+  ctx.lineTo(refX(1162), baseY);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(refX(1200), baseY);
+  ctx.lineTo(refX(1608), baseY);
+  ctx.stroke();
+  ctx.fillStyle="#111";
+  ctx.font="22px Arial";
+  ctx.textAlign="center";
+  ctx.textBaseline="middle";
+  ctx.fillText("≈", refX(1178), baseY-2);
+
+  ctx.setLineDash([6,5]);
+  ctx.strokeStyle="rgba(0,0,0,.72)";
+  ctx.lineWidth=1.25;
+  for(const f of REF_EDGE_TICKS){
+    const x = xMap(f);
+    ctx.beginPath();
+    ctx.moveTo(x, refY(222));
+    ctx.lineTo(x, baseY+1);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // Centre arrows as shown in 110.jpeg for named signal centres.
+  const centreMarkers = [
+    {f:1176.45, y0:348, y1:266},
+    {f:1207.14, y0:348, y1:266},
+    {f:1237, y0:407, y1:266},
+    {f:1278.75, y0:407, y1:266},
+    {f:1544.5, y0:407, y1:266},
+    {f:1575.42, y0:407, y1:266},
+  ];
+  ctx.strokeStyle="#111";
+  ctx.fillStyle="#111";
+  ctx.lineWidth=1.5;
+  for(const m of centreMarkers){
+    const x = xMap(m.f);
+    const y0 = refY(m.y0), y1 = refY(m.y1);
+    ctx.beginPath();
+    ctx.moveTo(x,y0);
+    ctx.lineTo(x,y1);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x,y1-10);
+    ctx.lineTo(x-7,y1+2);
+    ctx.lineTo(x+7,y1+2);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.fillStyle="#111";
+  ctx.font="11px Arial";
+  ctx.textAlign="right";
+  ctx.textBaseline="middle";
+  for(const tick of REF_FREQ_X.filter(t => t.f >= 1164 && t.f <= 1610)){
+    const x = xMap(tick.f);
+    ctx.beginPath();
+    ctx.strokeStyle="#111";
+    ctx.moveTo(x, baseY);
+    ctx.lineTo(x, baseY+9);
+    ctx.stroke();
+    ctx.save();
+    ctx.translate(x+3, baseY+13);
+    ctx.rotate(-Math.PI/2);
+    ctx.fillText(`${tick.label} MHz`,0,0);
+    ctx.restore();
+  }
+
+  ctx.fillStyle="#333";
+  ctx.font="11px Arial";
+  ctx.textAlign="left";
+  ctx.textBaseline="top";
+  ctx.fillText("Reference band plan fitted to supplied 110.jpeg brackets", chart.left, refY(30));
+
+  // dBm plot below the reference layer.
+  const plotTop = refY(418) + 82;
+  const plotBottom = h - margin.b;
+  const plotH = plotBottom - plotTop;
+  const yMin = -120;
+  const yMax = -30;
+  function yDbm(dbm){
+    const v = Math.max(yMin, Math.min(yMax, Number(dbm)));
+    return plotBottom - ((v - yMin) / (yMax - yMin)) * plotH;
+  }
+
+  ctx.fillStyle="#fff";
+  ctx.fillRect(chart.left, plotTop, chart.right-chart.left, plotH);
+  ctx.strokeStyle="#111";
+  ctx.lineWidth=1.4;
+  ctx.strokeRect(chart.left, plotTop, chart.right-chart.left, plotH);
+
+  // Subtle GNSS curtains inside the dBm plot use the same 110.jpeg x-coordinates.
+  for(const b of REF_SIGNAL_BLOCKS){
+    const [x,,bw,] = blockRectRef(b);
+    ctx.fillStyle = alphaColour(b.color, b.family === "GPS" ? 0.13 : 0.09);
+    ctx.fillRect(x, plotTop, bw, plotH);
+  }
+
+  // dBm y-axis and gridlines.
+  ctx.font="12px Arial";
+  ctx.textAlign="right";
+  ctx.textBaseline="middle";
+  for(let t=-120;t<=-30;t+=10){
+    const y = yDbm(t);
+    ctx.strokeStyle = t === -60 ? "rgba(180,35,24,.42)" : "rgba(0,0,0,.14)";
+    ctx.lineWidth = t === -60 ? 1.35 : 1;
+    ctx.beginPath();
+    ctx.moveTo(chart.left, y);
+    ctx.lineTo(chart.right, y);
+    ctx.stroke();
+    ctx.fillStyle = t === -60 ? "#8e1f1f" : "#111";
+    ctx.fillText(`${t}`, chart.left-9, y);
+  }
+  ctx.fillStyle="#111";
+  ctx.font="bold 14px Arial";
+  ctx.textAlign="center";
+  ctx.textBaseline="middle";
+  drawAxisLabel(ctx, "Detected strength (dBm)", 24, plotTop + plotH/2);
+
+  const spike = Number(data.spike_dbm ?? -60);
+  if(spike >= yMin && spike <= yMax){
+    const sy = yDbm(spike);
+    ctx.strokeStyle = "rgba(180,35,24,.9)";
+    ctx.lineWidth=1.3;
+    ctx.setLineDash([7,5]);
+    ctx.beginPath();
+    ctx.moveTo(chart.left, sy);
+    ctx.lineTo(chart.right, sy);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle="#8e1f1f";
+    ctx.font="12px Arial";
+    ctx.textAlign="left";
+    ctx.textBaseline="bottom";
+    ctx.fillText(`spike threshold ${fmt(spike)} dBm`, chart.left+8, sy-4);
+  }
+
+  // RF data bars: top = strongest observed dBm, black marker = average dBm.
+  const bins = (data.frequency_bins || []).filter(b => Number(b.event_count || 0) > 0 && b.max_dbm !== null && b.max_dbm !== undefined);
+  for(const b of bins){
+    const min = Number(b.freq_min_mhz), max = Number(b.freq_max_mhz);
+    const [x,bw] = bandRectFreq(min,max);
+    if(x + bw < chart.left || x > chart.right) continue;
+    const burden = Number(b.rf_burden_score || 0);
+    const fill = burden >= 75 ? "#b42318" : burden >= 50 ? "#d46a1f" : burden >= 25 ? "#d4a017" : "#1f7a3a";
+    const yTop = yDbm(Number(b.max_dbm));
+    const barW = Math.max(2.5, Math.min(bw * 0.86, 24));
+    const barX = x + Math.max(0, (bw-barW)/2);
+    ctx.globalAlpha = Math.max(0.55, Math.min(0.92, burden/100 + 0.35));
+    ctx.fillStyle = fill;
+    ctx.fillRect(barX, yTop, barW, Math.max(1.5, plotBottom-yTop));
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle="rgba(0,0,0,.48)";
+    ctx.lineWidth=0.8;
+    ctx.strokeRect(barX, yTop, barW, Math.max(1.5, plotBottom-yTop));
+    if(b.avg_dbm !== null && b.avg_dbm !== undefined){
+      const yAvg = yDbm(Number(b.avg_dbm));
+      ctx.strokeStyle="#111";
+      ctx.lineWidth=1.2;
+      ctx.beginPath();
+      ctx.moveTo(barX, yAvg);
+      ctx.lineTo(barX+barW, yAvg);
+      ctx.stroke();
+    }
+  }
+
+  // Peak traffic markers.
+  ctx.font="11px Arial";
+  ctx.textAlign="center";
+  ctx.textBaseline="middle";
+  const labelSlots = [];
+  for(const p of (data.peak_traffic || []).slice(0,9)){
+    const f = Number(p.freq_center_mhz);
+    const x = xMap(f);
+    if(x < chart.left || x > chart.right) continue;
+    const y = yDbm(p.max_dbm ?? -60);
+    ctx.fillStyle="#111";
+    ctx.beginPath();
+    ctx.arc(x,y,4,0,Math.PI*2);
+    ctx.fill();
+    let ly = y - 24;
+    for(const s of labelSlots){
+      if(Math.abs(s.x-x) < 50 && Math.abs(s.y-ly) < 20) ly -= 20;
+    }
+    ly = Math.max(plotTop + 16, ly);
+    labelSlots.push({x,y:ly});
+    ctx.strokeStyle="#111";
+    ctx.lineWidth=1;
+    ctx.beginPath();
+    ctx.moveTo(x,y-5);
+    ctx.lineTo(x,ly+7);
+    ctx.stroke();
+    ctx.fillStyle="#111";
+    ctx.fillText(`${f.toFixed(1)} MHz`, x, ly);
+    ctx.fillText(`${fmt(p.max_dbm)} dBm`, x, ly+12);
+  }
+
+  // Frequency axis: expanded bottom margin prevents labels being cut off.
+  ctx.strokeStyle="#111";
+  ctx.lineWidth=1.2;
+  ctx.beginPath();
+  ctx.moveTo(chart.left, plotBottom);
+  ctx.lineTo(chart.right, plotBottom);
+  ctx.stroke();
+  ctx.fillStyle="#111";
+  ctx.font="10px Arial";
+  ctx.textAlign="right";
+  ctx.textBaseline="middle";
+  const bottomTicks = REF_FREQ_X.filter(t => [1100,1164,1176.45,1189,1207.14,1214,1215,1237,1239.6,1254,1260,1268.52,1278.75,1300,1544,1545,1559,1563,1575.42,1587,1591,1593,1610,1650].includes(t.f));
+  for(const tick of bottomTicks){
+    const x = xMap(tick.f);
+    ctx.beginPath();
+    ctx.moveTo(x, plotBottom);
+    ctx.lineTo(x, plotBottom+9);
+    ctx.stroke();
+    ctx.save();
+    ctx.translate(x+3, plotBottom+18);
+    ctx.rotate(-Math.PI/2);
+    ctx.fillText(`${tick.label} MHz`,0,0);
+    ctx.restore();
+  }
+  ctx.font="bold 13px Arial";
+  ctx.textAlign="center";
+  ctx.textBaseline="bottom";
+  ctx.fillText("Frequency (MHz)", chart.left + (chart.right-chart.left)/2, h-18);
+
+  // Visual legend within the plot area.
+  const legend = [["Max dBm bar", "#b42318"], ["Avg dBm marker", "#111"], ["GPS", "#ffe25a"], ["Galileo", "#4d83c2"], ["GLONASS", "#ef7f33"], ["BeiDou", "#d698c5"]];
+  let lx = chart.left + 10;
+  const ly = plotTop + 14;
+  ctx.font="12px Arial";
+  ctx.textAlign="left";
+  ctx.textBaseline="middle";
+  for(const [label,color] of legend){
+    ctx.fillStyle=color;
+    ctx.fillRect(lx, ly-5, 17, 10);
+    ctx.strokeStyle="#777";
+    ctx.strokeRect(lx, ly-5, 17, 10);
+    ctx.fillStyle="#111";
+    ctx.fillText(label, lx+23, ly);
+    lx += Math.max(84, label.length*8+44);
+  }
+
+  ctx.fillStyle="#333";
+  ctx.font="11px Arial";
+  ctx.textAlign="right";
+  ctx.textBaseline="bottom";
+  ctx.fillText("RF bars use the same reference-fitted MHz brackets as the GNSS band layer.", chart.right, plotTop-8);
+}
+
+async function refresh(){
+  $("errorBox").style.display="none";
+  $("refreshBtn").disabled = true;
+  $("refreshBtn").textContent = "Loading...";
+  try{
+    const p = buildParams({freq_min_mhz:1100, freq_max_mhz:1650, max_rows:500000});
+    const flightParams = buildParams({duration_minutes:30, step_minutes:10, width_mhz:40, max_rows:500000});
+    latestClearance = await getJSON("/api/lantern/clearance-spectrum", p);
+    try{ latestBrief = await getJSON("/api/lantern/flight-brief", flightParams); }catch(e){ latestBrief = {launch_error:e.message}; }
+    try{ latestReporting = await getJSON("/api/lantern/reporting-interpretation", p); }catch(e){ latestReporting = null; }
+    if(latestClearance.error) throw new Error(latestClearance.error);
+    renderSummary(latestClearance, latestBrief);
+    renderReporting(latestClearance, latestReporting);
+    renderTables(latestClearance);
+    drawSpectrum(latestClearance);
+  }catch(e){
+    $("errorBox").style.display="block";
+    $("errorBox").textContent = e.stack || e.message || String(e);
+  }finally{
+    $("refreshBtn").disabled = false;
+    $("refreshBtn").textContent = "Refresh brief";
+  }
+}
+
+window.addEventListener("resize", ()=>{ if(latestClearance) drawSpectrum(latestClearance); });
+$("refreshBtn").addEventListener("click", refresh);
+qs();
+refresh();
+</script>
+  <script src="/static/platform_shell.js?v=0127" defer></script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>MOTH Briefing Mode</title>
@@ -6,11 +6,12 @@
     body{margin:0;background:#10151a;color:#f1f5f7;font-family:system-ui,-apple-system,Segoe UI,sans-serif}header{padding:24px 32px;background:#13212a;border-bottom:1px solid #33444f}main{padding:24px 32px;max-width:1280px;margin:auto}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px}.card{background:#18242c;border:1px solid #33444f;border-radius:14px;padding:18px;margin-bottom:18px;box-shadow:0 8px 28px rgba(0,0,0,.22)}.decision{font-size:24px;font-weight:900}.muted{color:#aab7bf}.pill{display:inline-block;padding:5px 10px;border-radius:99px;font-size:12px;font-weight:900}.good{background:#1f8f4d}.check{background:#c9831d}.bad{background:#b43a35}.none{background:#46545e}button,a.button{display:inline-block;padding:11px 13px;border-radius:8px;border:0;background:#2d7fb8;color:white;text-decoration:none;font-weight:800;margin-right:6px}.green{background:#1f8f4d}.amber{background:#c9831d}.gray{background:#46545e}ul{padding-left:20px}li{margin:7px 0}.traffic{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px}.traffic div{border-radius:8px;padding:10px;text-align:center;font-weight:800}.g{background:#1f8f4d}.a{background:#c9831d}.r{background:#b43a35}
   </style>
   <link rel="stylesheet" href="/static/lantern_nav.css" />
+  <link rel="stylesheet" href="/static/platform_shell.css?v=0127" />
 </head>
 <body>
 <header><h1>Briefing Mode <span class="pill none">UX v0.8.0</span></h1><div class="muted">Decision first. Evidence second. Technical detail third.</div></header>
 <main>
-  <p><a class="button gray" href="/static/home.html?v=080">Home</a><a class="button" href="/?v=060">Analyst map</a><a class="button amber" href="/static/launch_analysis.html?v=075">Launch analysis</a><a class="button gray" href="/static/data_quality.html?v=080">Data quality</a><button onclick="load()">Refresh</button></p>
+  <p><a class="button gray" href="/app?v=0122">Home</a><a class="button" href="/engineering/map?v=0122">Analyst map</a><a class="button amber" href="/engineering/rf?v=0122">Launch analysis</a><a class="button gray" href="/engineering/data-quality?v=0122">Data quality</a><button onclick="load()">Refresh</button></p>
   <section class="grid" id="cards"><div class="card">Loading decision cards...</div></section>
   <section class="card">
     <h2>How to brief this</h2>
@@ -31,14 +32,14 @@ function card(title,status,headline,reason,button){return `<div class="card"><h2
 async function load(){
  const d=await getJson('/api/ux/decision-cards');
  document.getElementById('cards').innerHTML =
-  card('Data quality',d.data_quality.status,d.data_quality.headline,d.data_quality.reason,'<a class="button gray" href="/static/data_quality.html?v=080">Check data quality</a>')+
-  card('Antenna placement',d.candidate.status,d.candidate.headline,d.candidate.reason,'<a class="button" href="/?v=060">Open map / candidates</a>')+
-  card('Launch timing',d.launch.status,d.launch.headline,d.launch.reason,'<a class="button amber" href="/static/launch_analysis.html?v=075">Open launch analysis</a>')+
+  card('Data quality',d.data_quality.status,d.data_quality.headline,d.data_quality.reason,'<a class="button gray" href="/engineering/data-quality?v=0122">Check data quality</a>')+
+  card('Antenna placement',d.candidate.status,d.candidate.headline,d.candidate.reason,'<a class="button" href="/engineering/map?v=0122">Open map / candidates</a>')+
+  card('Launch timing',d.launch.status,d.launch.headline,d.launch.reason,'<a class="button amber" href="/engineering/rf?v=0122">Open launch analysis</a>')+
   `<div class="card"><h2>Current filters</h2><ul>${(d.filter_summary||[]).map(x=>`<li>${esc(x)}</li>`).join('')}</ul><h2>Next actions</h2><ul>${(d.next_actions||[]).map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`;
 }
 load().catch(e=>document.getElementById('cards').innerHTML=`<div class="card"><h2>Error</h2><p>${esc(e.message)}</p></div>`);
 </script>
   <script src="/static/lantern_nav.js"></script>
+  <script src="/static/platform_shell.js?v=0127" defer></script>
 </body>
 </html>
-

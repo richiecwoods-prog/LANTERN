@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import csv
+import json
 import math
 import os
+import re
 import shutil
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query
-from fastapi.responses import HTMLResponse, ORJSONResponse, Response
+from fastapi.responses import HTMLResponse, ORJSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -38,6 +41,13 @@ class CandidateIn(BaseModel):
     antenna_height_agl_m: float | None = None
     practical_score: float = Field(default=0.5, ge=0, le=1)
     site_notes: str | None = None
+
+
+class MissionContextIn(BaseModel):
+    aoi: str | None = None
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
+    radius_m: float | None = Field(default=None, ge=100, le=500000)
 
 
 @app.on_event("startup")
@@ -121,6 +131,365 @@ def add_event_filters(
     add_frequency_filter(where, params, target_min_hz, target_max_hz)
     add_time_filter(where, params, start_utc, end_utc)
     return ids
+
+
+_DEFAULT_AOI_LABEL = "Lincoln, UK"
+_AOI_GAZETTEER: list[dict[str, Any]] = [
+    {
+        "label": "Lincoln, UK",
+        "aliases": [
+            "lincoln",
+            "lincoln uk",
+            "lincolnshire",
+            "eagle eye innovations hq",
+            "eei hq",
+            "hq",
+        ],
+        "lat": 53.2307,
+        "lon": -0.5406,
+        "radius_m": 25000.0,
+        "j2_query": "Lincoln Lincolnshire UK aviation security GNSS RF communications infrastructure",
+    },
+    {
+        "label": "Aden Adde / Mogadishu",
+        "aliases": ["aden adde", "hcmm", "mogadishu airport", "mogadishu", "somalia"],
+        "lat": 2.0140,
+        "lon": 45.3040,
+        "radius_m": 18000.0,
+        "j2_query": "Aden Adde Mogadishu Somalia aviation security GNSS RF",
+    },
+    {
+        "label": "Mogadishu city",
+        "aliases": ["mogadishu city", "xamar", "hamar"],
+        "lat": 2.0469,
+        "lon": 45.3182,
+        "radius_m": 25000.0,
+        "j2_query": "Mogadishu Somalia security aviation airport GNSS RF",
+    },
+    {
+        "label": "Kismayo / Kismaayo",
+        "aliases": ["kismayo", "kismaayo", "hcmk"],
+        "lat": -0.3774,
+        "lon": 42.4592,
+        "radius_m": 25000.0,
+        "j2_query": "Kismayo Somalia aviation security GNSS RF",
+    },
+    {
+        "label": "Hargeisa / Egal",
+        "aliases": ["hargeisa", "egal", "hcmh"],
+        "lat": 9.5132,
+        "lon": 44.0824,
+        "radius_m": 30000.0,
+        "j2_query": "Hargeisa Somaliland aviation security GNSS RF",
+    },
+    {
+        "label": "Berbera",
+        "aliases": ["berbera", "hcmI", "hcmib"],
+        "lat": 10.3892,
+        "lon": 44.9411,
+        "radius_m": 30000.0,
+        "j2_query": "Berbera Somaliland port airport aviation security GNSS RF",
+    },
+    {
+        "label": "Bosaso / Boosaaso",
+        "aliases": ["bosaso", "boosaaso", "bender qassim", "hcmf"],
+        "lat": 11.2753,
+        "lon": 49.1494,
+        "radius_m": 30000.0,
+        "j2_query": "Bosaso Puntland Somalia aviation security ISIS Somalia GNSS RF",
+    },
+]
+
+
+def _aoi_context_path() -> Path:
+    root = UPLOAD_DIR.parent
+    root.mkdir(parents=True, exist_ok=True)
+    return root / "mission_context.json"
+
+
+def _aoi_bounds(lat: float, lon: float, radius_m: float) -> dict[str, float]:
+    lat_delta = radius_m / 111_320.0
+    lon_scale = max(0.20, abs(math.cos(math.radians(lat))))
+    lon_delta = radius_m / (111_320.0 * lon_scale)
+    return {
+        "min_lat": round(lat - lat_delta, 6),
+        "max_lat": round(lat + lat_delta, 6),
+        "min_lon": round(lon - lon_delta, 6),
+        "max_lon": round(lon + lon_delta, 6),
+    }
+
+
+def _aoi_normalise(record: dict[str, Any]) -> dict[str, Any]:
+    label = str(record.get("label") or record.get("aoi") or _DEFAULT_AOI_LABEL).strip() or _DEFAULT_AOI_LABEL
+    lat = record.get("lat")
+    lon = record.get("lon")
+    radius = float(record.get("radius_m") or 18000.0)
+    out = {
+        "label": label,
+        "lat": float(lat) if lat is not None else None,
+        "lon": float(lon) if lon is not None else None,
+        "radius_m": radius,
+        "j2_query": str(record.get("j2_query") or label),
+        "source": str(record.get("source") or "gazetteer"),
+    }
+    for key in (
+        "collection_id",
+        "collection_ids",
+        "event_count",
+        "valid_event_count",
+        "file_name",
+        "upload_time_utc",
+    ):
+        if record.get(key) is not None:
+            out[key] = record.get(key)
+    out["filterable"] = out["lat"] is not None and out["lon"] is not None
+    if out["filterable"]:
+        out["bounds"] = _aoi_bounds(float(out["lat"]), float(out["lon"]), radius)
+    return out
+
+
+def _aoi_from_coordinates(text: str, radius_m: float | None = None) -> dict[str, Any] | None:
+    match = re.search(
+        r"(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)(?:\s*[, ]\s*(\d+(?:\.\d+)?)\s*(km|m)?)?",
+        text or "",
+        re.I,
+    )
+    if not match:
+        return None
+    lat = float(match.group(1))
+    lon = float(match.group(2))
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    radius = radius_m
+    if radius is None and match.group(3):
+        radius = float(match.group(3)) * (1000.0 if (match.group(4) or "m").lower() == "km" else 1.0)
+    radius = radius or 10000.0
+    return _aoi_normalise({
+        "label": f"{lat:.5f}, {lon:.5f}",
+        "lat": lat,
+        "lon": lon,
+        "radius_m": radius,
+        "j2_query": f"{lat:.5f} {lon:.5f}",
+        "source": "coordinates",
+    })
+
+
+def _aoi_text_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
+
+
+def _aoi_text_score(query: str, values: list[str]) -> int:
+    q = _aoi_text_key(query)
+    if not q:
+        return 1
+    parts = [p for p in q.split() if p]
+    best = 0
+    for raw in values:
+        v = _aoi_text_key(raw)
+        if not v:
+            continue
+        if v == q:
+            best = max(best, 100)
+        elif q in v or v in q:
+            best = max(best, 82)
+        elif parts and all(part in v for part in parts):
+            best = max(best, 68)
+        elif parts and any(part in v for part in parts):
+            best = max(best, 38)
+        ratio = SequenceMatcher(None, q, v).ratio()
+        if ratio >= 0.58:
+            best = max(best, int(40 + (ratio * 45)))
+        for part in parts:
+            if len(part) >= 4:
+                for token in v.split():
+                    token_ratio = SequenceMatcher(None, part, token).ratio()
+                    if token_ratio >= 0.74:
+                        best = max(best, int(36 + (token_ratio * 42)))
+    return best
+
+
+def _aoi_radius_from_bounds(min_lat: float, max_lat: float, min_lon: float, max_lon: float) -> float:
+    lat = (float(min_lat) + float(max_lat)) / 2.0
+    lon = (float(min_lon) + float(max_lon)) / 2.0
+    corners = [
+        (float(min_lat), float(min_lon)),
+        (float(min_lat), float(max_lon)),
+        (float(max_lat), float(min_lon)),
+        (float(max_lat), float(max_lon)),
+    ]
+    radius = max(haversine_m(lat, lon, c_lat, c_lon) for c_lat, c_lon in corners)
+    return max(1000.0, min(500000.0, (radius * 1.10) + 250.0))
+
+
+def _aoi_uploaded_coverage(limit: int = 20) -> list[dict[str, Any]]:
+    try:
+        conn = connect()
+        all_row = dict(conn.execute(
+            """
+            SELECT COUNT(e.event_id) AS event_count,
+                   SUM(CASE WHEN e.valid = 1 THEN 1 ELSE 0 END) AS valid_event_count,
+                   MIN(e.lat) AS min_lat,
+                   MAX(e.lat) AS max_lat,
+                   MIN(e.lon) AS min_lon,
+                   MAX(e.lon) AS max_lon
+            FROM moth_events e
+            WHERE e.valid = 1 AND e.lat IS NOT NULL AND e.lon IS NOT NULL
+            """
+        ).fetchone())
+        rows = rows_to_dicts(conn.execute(
+            """
+            SELECT c.collection_id,
+                   c.collection_name,
+                   c.file_name,
+                   c.upload_time_utc,
+                   COUNT(e.event_id) AS event_count,
+                   SUM(CASE WHEN e.valid = 1 THEN 1 ELSE 0 END) AS valid_event_count,
+                   MIN(e.lat) AS min_lat,
+                   MAX(e.lat) AS max_lat,
+                   MIN(e.lon) AS min_lon,
+                   MAX(e.lon) AS max_lon
+            FROM moth_collections c
+            JOIN moth_events e ON e.collection_id = c.collection_id
+            WHERE e.valid = 1 AND e.lat IS NOT NULL AND e.lon IS NOT NULL
+            GROUP BY c.collection_id
+            ORDER BY c.upload_time_utc DESC, c.collection_id DESC
+            LIMIT ?
+            """,
+            (max(1, int(limit)),),
+        ).fetchall())
+        conn.close()
+    except Exception:
+        try:
+            conn.close()  # type: ignore[has-type]
+        except Exception:
+            pass
+        return []
+
+    out: list[dict[str, Any]] = []
+
+    def make_record(label: str, row: dict[str, Any], extra: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        if row.get("min_lat") is None or row.get("min_lon") is None:
+            return None
+        min_lat = float(row["min_lat"])
+        max_lat = float(row["max_lat"])
+        min_lon = float(row["min_lon"])
+        max_lon = float(row["max_lon"])
+        lat = (min_lat + max_lat) / 2.0
+        lon = (min_lon + max_lon) / 2.0
+        radius = _aoi_radius_from_bounds(min_lat, max_lat, min_lon, max_lon)
+        count = int(row.get("valid_event_count") or row.get("event_count") or 0)
+        record = {
+            "label": label,
+            "aliases": [label, str(row.get("collection_name") or ""), str(row.get("file_name") or "")],
+            "lat": lat,
+            "lon": lon,
+            "radius_m": radius,
+            "j2_query": f"{label} aviation security GNSS RF communications infrastructure",
+            "source": "uploaded-csv",
+            "event_count": count,
+            "valid_event_count": count,
+            "file_name": row.get("file_name"),
+            "upload_time_utc": row.get("upload_time_utc"),
+        }
+        if extra:
+            record.update(extra)
+        return _aoi_normalise(record)
+
+    if int(all_row.get("valid_event_count") or 0) > 0:
+        rec = make_record("CSV coverage: all uploaded data", all_row, {"source": "uploaded-csv-all"})
+        if rec:
+            out.append(rec)
+
+    for row in rows:
+        name = row.get("collection_name") or row.get("file_name") or f"Collection {row.get('collection_id')}"
+        rec = make_record(f"CSV coverage: {name}", row, {"collection_id": row.get("collection_id")})
+        if rec:
+            out.append(rec)
+    return out
+
+
+def _aoi_search(query: str, limit: int = 8) -> list[dict[str, Any]]:
+    q = (query or "").strip()
+    results: list[dict[str, Any]] = []
+    coord = _aoi_from_coordinates(query)
+    if coord:
+        coord["score"] = 110
+        results.append(coord)
+    for item in [*_AOI_GAZETTEER, *_aoi_uploaded_coverage(limit=20)]:
+        haystack = [str(item.get("label", "")), *[str(x) for x in item.get("aliases", [])]]
+        score = _aoi_text_score(q, haystack)
+        if score:
+            rec = _aoi_normalise({**item, "source": item.get("source") or "gazetteer"})
+            rec["score"] = score
+            results.append(rec)
+    unique: dict[str, dict[str, Any]] = {}
+    for rec in sorted(results, key=lambda r: int(r.get("score") or 0), reverse=True):
+        unique.setdefault(str(rec.get("label")), rec)
+    return list(unique.values())[:limit]
+
+
+def _aoi_default() -> dict[str, Any]:
+    return _aoi_search(_DEFAULT_AOI_LABEL, limit=1)[0]
+
+
+def _aoi_read_context() -> dict[str, Any]:
+    rec = _aoi_default()
+    path = _aoi_context_path()
+    if path.exists():
+        try:
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(saved, dict):
+                saved_rec = saved.get("aoi_filter") if isinstance(saved.get("aoi_filter"), dict) else saved
+                rec = _aoi_normalise(saved_rec)
+        except Exception:
+            rec = _aoi_default()
+    return rec
+
+
+def _aoi_write_context(record: dict[str, Any]) -> dict[str, Any]:
+    rec = _aoi_normalise(record)
+    payload = {
+        "aoi": rec["label"],
+        "aoi_filter": rec,
+        "updated_utc": iso_no_ms(datetime.now(timezone.utc)),
+    }
+    _aoi_context_path().write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    return rec
+
+
+def _aoi_resolve(aoi: str | None = None, radius_m: float | None = None) -> dict[str, Any] | None:
+    text = (aoi or "").strip()
+    if text.lower() in {"all", "none", "off", "false", "0"}:
+        return None
+    if not text or text.lower() in {"mission", "current", "shared"}:
+        rec = _aoi_read_context()
+    else:
+        coord = _aoi_from_coordinates(text, radius_m=radius_m)
+        matches = _aoi_search(text, limit=1)
+        rec = coord or (matches[0] if matches else _aoi_normalise({"label": text, "source": "text"}))
+    if radius_m is not None and rec and rec.get("filterable"):
+        rec = _aoi_normalise({**rec, "radius_m": float(radius_m)})
+    return rec if rec and rec.get("filterable") else None
+
+
+def add_aoi_filter(where: list[str], params: list[Any], aoi: str | None = None, aoi_radius_m: float | None = None) -> dict[str, Any] | None:
+    rec = _aoi_resolve(aoi, radius_m=aoi_radius_m)
+    if not rec:
+        return None
+    bounds = rec.get("bounds") or {}
+    where.append("lat BETWEEN ? AND ?")
+    params.extend([bounds["min_lat"], bounds["max_lat"]])
+    where.append("lon BETWEEN ? AND ?")
+    params.extend([bounds["min_lon"], bounds["max_lon"]])
+    return rec
+
+
+def mission_aoi_query_text(aoi: str | None = None, default: str = _DEFAULT_AOI_LABEL) -> str:
+    text = (aoi or "").strip()
+    if not text or text.lower() in {"mission", "current", "shared"} or text == default:
+        rec = _aoi_read_context()
+        return str(rec.get("j2_query") or rec.get("label") or default)
+    return text
 
 
 def parse_dt(value: str | None) -> datetime | None:
@@ -382,6 +751,8 @@ def summary(
     target_max_hz: float | None = None,
     start_utc: str | None = None,
     end_utc: str | None = None,
+    aoi: str | None = "mission",
+    aoi_radius_m: float | None = Query(default=None, ge=100, le=500000),
 ) -> dict[str, Any]:
     where = ["1 = 1"]
     params: list[Any] = []
@@ -396,6 +767,7 @@ def summary(
         start_utc=start_utc,
         end_utc=end_utc,
     )
+    aoi_filter = add_aoi_filter(where, params, aoi, aoi_radius_m)
     where_sql = " AND ".join(where)
     conn = connect()
     collections_rows = rows_to_dicts(conn.execute("SELECT * FROM moth_collections ORDER BY upload_time_utc DESC, collection_id DESC").fetchall())
@@ -436,7 +808,7 @@ def summary(
         params,
     ).fetchall())
     conn.close()
-    return {"totals": totals, "collections": collections_rows, "band_summary": freq, "selected_collection_ids": ids}
+    return {"totals": totals, "collections": collections_rows, "band_summary": freq, "selected_collection_ids": ids, "aoi_filter": aoi_filter}
 
 
 @app.get("/api/frequency-summary")
@@ -485,6 +857,8 @@ def events(
     target_max_hz: float | None = None,
     start_utc: str | None = None,
     end_utc: str | None = None,
+    aoi: str | None = "mission",
+    aoi_radius_m: float | None = Query(default=None, ge=100, le=500000),
     limit: int = Query(default=5000, ge=1, le=50000),
 ) -> list[dict[str, Any]]:
     where = ["valid = 1", "lat IS NOT NULL", "lon IS NOT NULL"]
@@ -500,6 +874,7 @@ def events(
         start_utc=start_utc,
         end_utc=end_utc,
     )
+    add_aoi_filter(where, params, aoi, aoi_radius_m)
     sql = "SELECT * FROM moth_events WHERE " + " AND ".join(where) + " ORDER BY event_id DESC LIMIT ?"
     params.append(limit)
     conn = connect()
@@ -525,13 +900,26 @@ def events_geojson(
     target_max_hz: float | None = None,
     start_utc: str | None = None,
     end_utc: str | None = None,
+    aoi: str | None = "mission",
+    aoi_radius_m: float | None = Query(default=None, ge=100, le=500000),
     limit: int = Query(default=10000, ge=1, le=50000),
 ) -> dict[str, Any]:
     return {
         "type": "FeatureCollection",
         "features": [
             point_feature(row)
-            for row in events(collection_id, collection_ids, min_dbm, target_min_hz, target_max_hz, start_utc, end_utc, limit)
+            for row in events(
+                collection_id=collection_id,
+                collection_ids=collection_ids,
+                min_dbm=min_dbm,
+                target_min_hz=target_min_hz,
+                target_max_hz=target_max_hz,
+                start_utc=start_utc,
+                end_utc=end_utc,
+                aoi=aoi,
+                aoi_radius_m=aoi_radius_m,
+                limit=limit,
+            )
             if row.get("lat") is not None and row.get("lon") is not None
         ],
     }
@@ -621,6 +1009,8 @@ def query_events_for_map(
     min_dbm: float | None = None,
     start_utc: str | None = None,
     end_utc: str | None = None,
+    aoi: str | None = "mission",
+    aoi_radius_m: float | None = None,
 ) -> list[dict[str, Any]]:
     where = ["valid = 1", "lat IS NOT NULL", "lon IS NOT NULL", "strength_dbm IS NOT NULL"]
     params: list[Any] = []
@@ -630,6 +1020,7 @@ def query_events_for_map(
         where.append("strength_dbm >= ?")
         params.append(min_dbm)
     add_time_filter(where, params, start_utc, end_utc)
+    add_aoi_filter(where, params, aoi, aoi_radius_m)
     conn = connect()
     rows = rows_to_dicts(conn.execute(
         f"""
@@ -747,6 +1138,8 @@ def h3_geojson(
     target_max_hz: float | None = None,
     start_utc: str | None = None,
     end_utc: str | None = None,
+    aoi: str | None = "mission",
+    aoi_radius_m: float | None = Query(default=None, ge=100, le=500000),
 ) -> dict[str, Any]:
     rows = query_events_for_map(
         collection_id=collection_id,
@@ -754,6 +1147,8 @@ def h3_geojson(
         min_dbm=min_dbm,
         start_utc=start_utc,
         end_utc=end_utc,
+        aoi=aoi,
+        aoi_radius_m=aoi_radius_m,
     )
     grouped: dict[str, dict[str, Any]] = {}
     for row in rows:
@@ -810,6 +1205,8 @@ def antenna_suitability_geojson(
     min_dbm: float | None = None,
     start_utc: str | None = None,
     end_utc: str | None = None,
+    aoi: str | None = "mission",
+    aoi_radius_m: float | None = Query(default=None, ge=100, le=500000),
 ) -> dict[str, Any]:
     rows = query_events_for_map(
         collection_id=collection_id,
@@ -817,6 +1214,8 @@ def antenna_suitability_geojson(
         min_dbm=min_dbm,
         start_utc=start_utc,
         end_utc=end_utc,
+        aoi=aoi,
+        aoi_radius_m=aoi_radius_m,
     )
     grouped: dict[str, dict[str, Any]] = {}
     for row in rows:
@@ -1050,10 +1449,24 @@ def candidates() -> list[dict[str, Any]]:
 
 
 @app.get("/api/candidates.geojson")
-def candidates_geojson() -> dict[str, Any]:
+def candidates_geojson(
+    aoi: str | None = "mission",
+    aoi_radius_m: float | None = Query(default=None, ge=100, le=500000),
+) -> dict[str, Any]:
+    rows = candidates()
+    aoi_filter = _aoi_resolve(aoi, radius_m=aoi_radius_m)
+    if aoi_filter:
+        lat = float(aoi_filter["lat"])
+        lon = float(aoi_filter["lon"])
+        radius = float(aoi_filter["radius_m"])
+        rows = [
+            row for row in rows
+            if row.get("lat") is not None and row.get("lon") is not None
+            and haversine_m(lat, lon, float(row["lat"]), float(row["lon"])) <= radius
+        ]
     return {
         "type": "FeatureCollection",
-        "features": [point_feature(row) for row in candidates()],
+        "features": [point_feature(row) for row in rows],
     }
 
 
@@ -1321,6 +1734,8 @@ def confidence_geojson(
     min_dbm: float | None = None,
     start_utc: str | None = None,
     end_utc: str | None = None,
+    aoi: str | None = "mission",
+    aoi_radius_m: float | None = Query(default=None, ge=100, le=500000),
 ) -> dict[str, Any]:
     """Separate confidence overlay for briefing mode.
 
@@ -1333,6 +1748,8 @@ def confidence_geojson(
         min_dbm=min_dbm,
         start_utc=start_utc,
         end_utc=end_utc,
+        aoi=aoi,
+        aoi_radius_m=aoi_radius_m,
     )
     grouped: dict[str, dict[str, Any]] = {}
     for row in rows:
@@ -1660,9 +2077,9 @@ from fastapi import Query as _MothQuery, HTTPException as _MothHTTPException
 
 _MOTH_ADVANCED_VERSION = "0.7.5"
 _MOTH_GNSS_BANDS = {
-    "L1": {"center_hz": 1575.42e6, "default_width_mhz": 40.0, "note": "GNSS L1 practical Â±20 MHz display window"},
-    "L2": {"center_hz": 1227.60e6, "default_width_mhz": 40.0, "note": "GNSS L2 practical Â±20 MHz display window"},
-    "L5": {"center_hz": 1176.45e6, "default_width_mhz": 40.0, "note": "GNSS L5 practical Â±20 MHz display window"},
+    "L1": {"center_hz": 1575.42e6, "default_width_mhz": 40.0, "note": "GNSS L1 practical +/-20 MHz display window"},
+    "L2": {"center_hz": 1227.60e6, "default_width_mhz": 40.0, "note": "GNSS L2 practical +/-20 MHz display window"},
+    "L5": {"center_hz": 1176.45e6, "default_width_mhz": 40.0, "note": "GNSS L5 practical +/-20 MHz display window"},
 }
 
 
@@ -2104,7 +2521,7 @@ def moth_advanced_launch_windows(
         recommendation_type, interpretation = _moth_adv_recommendation_label(score, gnss_count, gnss_spikes)
         reasons = [
             f"GNSS-window event count: {gnss_count}",
-            f"Strong GNSS-window spikes â‰¥ {spike_dbm} dBm: {gnss_spikes}",
+            f"Strong GNSS-window spikes >= {spike_dbm} dBm: {gnss_spikes}",
         ]
         if strong is not None:
             reasons.append(f"Strongest GNSS-window detection: {round(strong, 1)} dBm")
@@ -2739,7 +3156,7 @@ def _mission_all_rf_fallback_windows(*, collection_id=None, collection_ids=None,
             "reasons": [
                 "GNSS-specific launch windows could not be ranked from the current filters.",
                 f"Fallback all-RF event count: {w['all_rf_event_count']}",
-                f"Fallback all-RF spike count â‰¥ {spike_dbm} dBm: {w['all_rf_spike_count']}",
+                f"Fallback all-RF spike count >= {spike_dbm} dBm: {w['all_rf_spike_count']}",
             ],
         })
     windows.sort(key=lambda x: x["score_0_100"], reverse=True)
@@ -2792,7 +3209,7 @@ def _mission_call_launch_windows(**kwargs):
         }
 
 
-def _mission_call_candidate_scores(*, collection_ids=None, target_min_hz=None, target_max_hz=None, radius_m=1500.0, start_utc=None, end_utc=None):
+def _mission_call_candidate_scores(*, collection_ids=None, target_min_hz=None, target_max_hz=None, radius_m=1500.0, start_utc=None, end_utc=None, max_rows=60000):
     try:
         # score_candidate_sites is imported by the main app in recent baselines.
         return score_candidate_sites(  # type: ignore[name-defined]
@@ -2802,6 +3219,7 @@ def _mission_call_candidate_scores(*, collection_ids=None, target_min_hz=None, t
             collection_ids=collection_ids or [],
             start_utc=start_utc,
             end_utc=end_utc,
+            max_rows=max_rows,
         )
     except Exception:
         try:
@@ -2882,12 +3300,68 @@ def _mission_short_operator_brief(*, readiness, checks, launch, candidate, data_
     }
 
 
+def _mission_numeric_arg(value, fallback, caster, minimum=None, maximum=None):
+    try:
+        parsed = caster(value)
+    except (TypeError, ValueError):
+        try:
+            parsed = caster(getattr(value, "default", fallback))
+        except (TypeError, ValueError):
+            parsed = fallback
+    if minimum is not None and parsed < minimum:
+        return minimum
+    if maximum is not None and parsed > maximum:
+        return maximum
+    return parsed
+
+
+def _mission_float_arg(value, fallback: float, minimum: float | None = None, maximum: float | None = None) -> float:
+    return float(_mission_numeric_arg(value, fallback, float, minimum, maximum))
+
+
+def _mission_int_arg(value, fallback: int, minimum: int | None = None, maximum: int | None = None) -> int:
+    return int(_mission_numeric_arg(value, fallback, int, minimum, maximum))
+
+
+def _mission_period_arg(value, fallback: str = "day") -> str:
+    if not isinstance(value, str):
+        value = getattr(value, "default", fallback)
+    period = str(value or fallback).strip().lower()
+    return period if period in {"day", "week", "month"} else fallback
+
+
+def _mission_recent_sane_bounds(max_rows: int) -> tuple[str | None, str | None]:
+    limit = _mission_int_arg(max_rows, 60000, 1000, 500000)
+    conn = connect()
+    try:
+        row = conn.execute(
+            """
+            SELECT MIN(timestamp_utc), MAX(timestamp_utc)
+            FROM (
+                SELECT timestamp_utc
+                FROM moth_events
+                WHERE valid = 1
+                  AND timestamp_utc >= '2020-01-01T00:00:00Z'
+                  AND timestamp_utc <= '2035-12-31T23:59:59Z'
+                ORDER BY timestamp_utc DESC
+                LIMIT ?
+            )
+            """,
+            (limit,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None, None
+    return row[0], row[1]
+
+
 @app.get("/api/mission/health")
 def mission_health() -> dict[str, _MissionAny]:
     return {
         "status": "ok",
         "mission_version": _MOTH_MISSION_VERSION,
-        "page": "/static/mission_brief.html?v=091",
+        "page": "/static/mission_brief.html?v=092",
         "data_quality_endpoint": "/api/mission/readiness",
         "brief_endpoint": "/api/mission/brief",
     }
@@ -2910,6 +3384,14 @@ def mission_readiness(
     connectivity_max_hz: float | None = None,
     max_rows: int = _MissionQuery(default=500000, ge=1000, le=1000000),
 ) -> dict[str, _MissionAny]:
+    radius_m = _mission_float_arg(radius_m, 1500.0, 50.0, 10000.0)
+    duration_minutes = _mission_int_arg(duration_minutes, 30, 5, 240)
+    step_minutes = _mission_int_arg(step_minutes, 10, 1, 120)
+    width_mhz = _mission_float_arg(width_mhz, 40.0, 1.0, 100.0)
+    spike_dbm = _mission_float_arg(spike_dbm, -60.0)
+    max_rows = _mission_int_arg(max_rows, 500000, 1000, 1000000)
+    if not start_utc and not end_utc:
+        start_utc, end_utc = _mission_recent_sane_bounds(max_rows)
     ids = _mission_parse_ids(collection_id, collection_ids)
     dq = _mission_call_data_quality()
     launch = _mission_call_launch_windows(
@@ -2926,7 +3408,7 @@ def mission_readiness(
         radius_m=radius_m,
         max_rows=max_rows,
     )
-    candidates = _mission_call_candidate_scores(collection_ids=ids, target_min_hz=target_min_hz, target_max_hz=target_max_hz, radius_m=radius_m, start_utc=start_utc, end_utc=end_utc)
+    candidates = _mission_call_candidate_scores(collection_ids=ids, target_min_hz=target_min_hz, target_max_hz=target_max_hz, radius_m=radius_m, start_utc=start_utc, end_utc=end_utc, max_rows=max_rows)
     candidates = sorted(candidates, key=lambda c: (c.get("score_0_100") is not None, float(c.get("score_0_100") or -1)), reverse=True)[:10]
     grade, checks = _mission_readiness_grade(dq, launch, candidates)
     return {
@@ -2959,6 +3441,12 @@ def mission_brief(
     connectivity_max_hz: float | None = None,
     max_rows: int = _MissionQuery(default=500000, ge=1000, le=1000000),
 ) -> dict[str, _MissionAny]:
+    radius_m = _mission_float_arg(radius_m, 1500.0, 50.0, 10000.0)
+    duration_minutes = _mission_int_arg(duration_minutes, 30, 5, 240)
+    step_minutes = _mission_int_arg(step_minutes, 10, 1, 120)
+    width_mhz = _mission_float_arg(width_mhz, 40.0, 1.0, 100.0)
+    spike_dbm = _mission_float_arg(spike_dbm, -60.0)
+    max_rows = _mission_int_arg(max_rows, 500000, 1000, 1000000)
     readiness = mission_readiness(
         collection_id=collection_id,
         collection_ids=collection_ids,
@@ -3002,6 +3490,7 @@ def ai_operator_brief(
     end_utc: str | None = None,
     radius_m: float = _MissionQuery(default=1500.0, ge=50.0, le=10000.0),
 ) -> dict[str, _MissionAny]:
+    radius_m = _mission_float_arg(radius_m, 1500.0, 50.0, 10000.0)
     brief = mission_brief(collection_id=collection_id, collection_ids=collection_ids, target_min_hz=target_min_hz, target_max_hz=target_max_hz, start_utc=start_utc, end_utc=end_utc, radius_m=radius_m)
     op = brief.get("operator_brief") or {}
     return {
@@ -3026,13 +3515,20 @@ def mission_report_html(
     end_utc: str | None = None,
     radius_m: float = _MissionQuery(default=1500.0, ge=50.0, le=10000.0),
     duration_minutes: int = _MissionQuery(default=30, ge=5, le=240),
-    step_minutes: int = _MissionQuery(default=10, ge=1, le=120),
+    step_minutes: int = _MissionQuery(default=30, ge=1, le=120),
     width_mhz: float = _MissionQuery(default=40.0, ge=1.0, le=100.0),
     spike_dbm: float = _MissionQuery(default=-60.0),
     connectivity_min_hz: float | None = None,
     connectivity_max_hz: float | None = None,
+    max_rows: int = _MissionQuery(default=60000, ge=1000, le=500000),
 ):
-    data = mission_brief(collection_id=collection_id, collection_ids=collection_ids, target_min_hz=target_min_hz, target_max_hz=target_max_hz, start_utc=start_utc, end_utc=end_utc, radius_m=radius_m, duration_minutes=duration_minutes, step_minutes=step_minutes, width_mhz=width_mhz, spike_dbm=spike_dbm, connectivity_min_hz=connectivity_min_hz, connectivity_max_hz=connectivity_max_hz)
+    radius_m = _mission_float_arg(radius_m, 1500.0, 50.0, 10000.0)
+    duration_minutes = _mission_int_arg(duration_minutes, 30, 5, 240)
+    step_minutes = _mission_int_arg(step_minutes, 30, 1, 120)
+    width_mhz = _mission_float_arg(width_mhz, 40.0, 1.0, 100.0)
+    spike_dbm = _mission_float_arg(spike_dbm, -60.0)
+    max_rows = _mission_int_arg(max_rows, 60000, 1000, 500000)
+    data = mission_brief(collection_id=collection_id, collection_ids=collection_ids, target_min_hz=target_min_hz, target_max_hz=target_max_hz, start_utc=start_utc, end_utc=end_utc, radius_m=radius_m, duration_minutes=duration_minutes, step_minutes=step_minutes, width_mhz=width_mhz, spike_dbm=spike_dbm, connectivity_min_hz=connectivity_min_hz, connectivity_max_hz=connectivity_max_hz, max_rows=max_rows)
     r = data.get("readiness") or {}
     op = data.get("operator_brief") or {}
     top = r.get("top_candidates") or []
@@ -3219,6 +3715,7 @@ def mission_time_sanity(
     sane_end_utc: str | None = None,
     max_rows: int = _v092_Query(default=750000, ge=1000, le=2000000),
 ) -> dict[str, _v092_Any]:
+    max_rows = _mission_int_arg(max_rows, 750000, 1000, 2000000)
     rows, ids = _v092_fetch_events(collection_id=collection_id, collection_ids=collection_ids, max_rows=max_rows, valid_only=False)
     user_start = _v092_parse_dt(sane_start_utc)
     user_end = _v092_parse_dt(sane_end_utc)
@@ -3274,6 +3771,9 @@ def mission_pattern_of_life(
     max_rows: int = _v092_Query(default=750000, ge=1000, le=2000000),
 ) -> dict[str, _v092_Any]:
     # Use start/end as active analysis filters; sane_start/end can further constrain GPS-time quality.
+    period = _mission_period_arg(period)
+    spike_dbm = _mission_float_arg(spike_dbm, -60.0)
+    max_rows = _mission_int_arg(max_rows, 750000, 1000, 2000000)
     rows, ids = _v092_fetch_events(
         collection_id=collection_id,
         collection_ids=collection_ids,
@@ -3371,12 +3871,19 @@ def mission_jsp101_report_html(
     end_utc: str | None = None,
     radius_m: float = _v092_Query(default=1500.0, ge=50.0, le=10000.0),
     duration_minutes: int = _v092_Query(default=30, ge=5, le=240),
-    step_minutes: int = _v092_Query(default=10, ge=1, le=120),
+    step_minutes: int = _v092_Query(default=30, ge=1, le=120),
     width_mhz: float = _v092_Query(default=40.0, ge=1.0, le=100.0),
     spike_dbm: float = _v092_Query(default=-60.0),
     period: str = _v092_Query(default="day", pattern="^(day|week|month)$"),
-    max_rows: int = _v092_Query(default=500000, ge=1000, le=2000000),
+    max_rows: int = _v092_Query(default=60000, ge=1000, le=2000000),
 ):
+    radius_m = _mission_float_arg(radius_m, 1500.0, 50.0, 10000.0)
+    duration_minutes = _mission_int_arg(duration_minutes, 30, 5, 240)
+    step_minutes = _mission_int_arg(step_minutes, 30, 1, 120)
+    width_mhz = _mission_float_arg(width_mhz, 40.0, 1.0, 100.0)
+    spike_dbm = _mission_float_arg(spike_dbm, -60.0)
+    period = _mission_period_arg(period)
+    max_rows = _mission_int_arg(max_rows, 60000, 1000, 2000000)
     try:
         brief = mission_brief(collection_id=collection_id, collection_ids=collection_ids, target_min_hz=target_min_hz, target_max_hz=target_max_hz, start_utc=start_utc, end_utc=end_utc, radius_m=radius_m, duration_minutes=duration_minutes, step_minutes=step_minutes, width_mhz=width_mhz, spike_dbm=spike_dbm, max_rows=max_rows)  # type: ignore[name-defined]
     except Exception as exc:
@@ -3424,7 +3931,7 @@ def mission_jsp101_report_html(
 """
     return _v092_HTMLResponse(html)
 
-# ---- EEI LANTERN v0.10.0 Flight Safety / GNSS Clearance layer ----
+# ---- LANTERN v0.10.0 Flight Safety / GNSS Clearance layer ----
 # Additive endpoints: standalone briefing page, constellation-aware GNSS L-band
 # clearance scoring, RF-burden GeoJSON, and simple report hooks.
 
@@ -3869,7 +4376,7 @@ def lantern_page() -> str:
     page = STATIC_DIR / "lantern_flight_safety.html"  # type: ignore[name-defined]
     if page.exists():
         return page.read_text(encoding="utf-8")
-    return "<h1>EEI LANTERN</h1><p>lantern_flight_safety.html is not installed in the static folder.</p>"
+    return "<h1>LANTERN</h1><p>lantern_flight_safety.html is not installed in the static folder.</p>"
 
 
 @app.get("/api/lantern/health")
@@ -4076,9 +4583,9 @@ def lantern_rf_burden_geojson(
         "colour_logic": _LANTERN_STYLE_NOTE,
     }
 
-# ---- end EEI LANTERN v0.10.0 additions ----
+# ---- end LANTERN v0.10.0 additions ----
 
-# ---- EEI LANTERN v0.10.3 signal interpretation reporting ----
+# ---- LANTERN v0.10.3 signal interpretation reporting ----
 # Additive reporting endpoint. It explains strong dBm detections in operational
 # context without changing deterministic clearance scoring.
 
@@ -4396,9 +4903,9 @@ def lantern_reporting_interpretation(
         ],
     }
 
-# ---- end EEI LANTERN v0.10.3 signal interpretation reporting ----
+# ---- end LANTERN v0.10.3 signal interpretation reporting ----
 
-# ---- EEI LANTERN v0.11.3 J2 Live Article Rotator API ----
+# ---- LANTERN v0.11.3 J2 Live Article Rotator API ----
 # Restores the real J2 Live Report article list, links and live-update feed.
 # This block is intentionally additive, but the installer removes earlier broken /api/j2 blocks first.
 
@@ -4421,7 +4928,7 @@ from fastapi.responses import HTMLResponse as _J2HTMLResponse, Response as _J2Re
 
 _J2_API_VERSION = "0.11.3"
 _J2_CACHE_SECONDS = 10 * 60
-_J2_DEFAULT_AOI = "Aden Adde / Mogadishu"
+_J2_DEFAULT_AOI = "Lincoln, UK"
 _J2_DEFAULT_ROTATE_SECONDS = 12
 _J2_DEFAULT_LIVE_REFRESH_MINUTES = 5
 
@@ -4628,8 +5135,13 @@ def _j2_local_metrics(collection_id: int | None = None, collection_ids: str | No
     }
 
 
+def _j2_is_uk_aoi(aoi: str) -> bool:
+    text = (aoi or "").lower()
+    return any(term in text for term in ("lincoln", "lincolnshire", " united kingdom", " uk ", " uk", "gb", "britain"))
+
+
 def _j2_source_register(aoi: str = _J2_DEFAULT_AOI) -> list[dict[str, _J2Any]]:
-    return [
+    common = [
         {
             "title": "EASA GNSS outages and alterations watch page",
             "source": "EASA",
@@ -4638,17 +5150,6 @@ def _j2_source_register(aoi: str = _J2_DEFAULT_AOI) -> list[dict[str, _J2Any]]:
             "category": "GNSS/RF",
             "confidence": "source-register",
             "summary": "Official aviation safety watch page for GNSS jamming/spoofing affected areas. Treat as current OSINT context, not local receiver proof.",
-            "aoi": aoi,
-            "live": False,
-        },
-        {
-            "title": "EASA Somalia conflict-zone information bulletin",
-            "source": "EASA CZIB",
-            "url": "https://www.easa.europa.eu/en/domains/air-operations/czibs/czib-2017-05r19",
-            "published_utc": None,
-            "category": "Aviation",
-            "confidence": "source-register",
-            "summary": "Official conflict-zone aviation context relevant to conservative airport-area planning and formal coordination.",
             "aoi": aoi,
             "live": False,
         },
@@ -4675,6 +5176,88 @@ def _j2_source_register(aoi: str = _J2_DEFAULT_AOI) -> list[dict[str, _J2Any]]:
             "live": False,
         },
         {
+            "title": "FAA GPS/GNSS Interference Resource Guide",
+            "source": "FAA",
+            "url": "https://www.faa.gov/about/office_org/headquarters_offices/avs/offices/afx/afs/afs400/afs410/GNSS/GPS_GNSS_Interference_Resource_Guide.pdf",
+            "published_utc": None,
+            "category": "Aviation",
+            "confidence": "reference",
+            "summary": "Operational reference for recognising, reporting and responding to GPS/GNSS interference.",
+            "aoi": aoi,
+            "live": False,
+        },
+    ]
+    if _j2_is_uk_aoi(aoi):
+        return common + [
+            {
+                "title": "UK Civil Aviation Authority",
+                "source": "UK CAA",
+                "url": "https://www.caa.co.uk/",
+                "published_utc": None,
+                "category": "Aviation",
+                "confidence": "official-source",
+                "summary": "Official UK aviation regulator source for aviation safety, airspace and operational reference checks.",
+                "aoi": aoi,
+                "live": False,
+            },
+            {
+                "title": "NATS Aeronautical Information Service",
+                "source": "NATS AIS",
+                "url": "https://nats-uk.ead-it.com/",
+                "published_utc": None,
+                "category": "Aviation",
+                "confidence": "official-source",
+                "summary": "UK aeronautical information source family for NOTAM, AIP and flight-planning context where applicable.",
+                "aoi": aoi,
+                "live": False,
+            },
+            {
+                "title": "Ofcom spectrum interference support",
+                "source": "Ofcom",
+                "url": "https://www.ofcom.org.uk/spectrum/interference/",
+                "published_utc": None,
+                "category": "GNSS/RF",
+                "confidence": "official-source",
+                "summary": "UK spectrum regulator reference for interference handling and radio-spectrum context.",
+                "aoi": aoi,
+                "live": False,
+            },
+            {
+                "title": "Met Office space weather",
+                "source": "Met Office",
+                "url": "https://www.metoffice.gov.uk/weather/specialist-forecasts/space-weather",
+                "published_utc": None,
+                "category": "GNSS/RF",
+                "confidence": "official-source",
+                "summary": "UK space-weather reference for solar/geomagnetic context that can affect GNSS and communications resilience.",
+                "aoi": aoi,
+                "live": False,
+            },
+            {
+                "title": "Lincolnshire Police news",
+                "source": "Lincolnshire Police",
+                "url": "https://www.lincs.police.uk/news/lincolnshire/news/",
+                "published_utc": None,
+                "category": "Security",
+                "confidence": "official-source",
+                "summary": "Local public security context for Lincolnshire. Use as source-linked local awareness, not RF attribution.",
+                "aoi": aoi,
+                "live": False,
+            },
+        ]
+    return common + [
+        {
+            "title": "EASA Somalia conflict-zone information bulletin",
+            "source": "EASA CZIB",
+            "url": "https://www.easa.europa.eu/en/domains/air-operations/czibs/czib-2017-05r19",
+            "published_utc": None,
+            "category": "Aviation",
+            "confidence": "source-register",
+            "summary": "Official conflict-zone aviation context relevant to conservative airport-area planning and formal coordination.",
+            "aoi": aoi,
+            "live": False,
+        },
+        {
             "title": "Somalia Civil Aviation Authority eAIP - HCMM Aden Adde Intl",
             "source": "SCAA eAIP",
             "url": "https://aip.scaa.gov.so/eAIP/HC-AD-2.HCMM-en-GB.html",
@@ -4696,29 +5279,27 @@ def _j2_source_register(aoi: str = _J2_DEFAULT_AOI) -> list[dict[str, _J2Any]]:
             "aoi": aoi,
             "live": False,
         },
-        {
-            "title": "FAA GPS/GNSS Interference Resource Guide",
-            "source": "FAA",
-            "url": "https://www.faa.gov/about/office_org/headquarters_offices/avs/offices/afx/afs/afs400/afs410/GNSS/GPS_GNSS_Interference_Resource_Guide.pdf",
-            "published_utc": None,
-            "category": "Aviation",
-            "confidence": "reference",
-            "summary": "Operational reference for recognising, reporting and responding to GPS/GNSS interference.",
-            "aoi": aoi,
-            "live": False,
-        },
     ]
 
 
 def _j2_query_variants(aoi: str) -> list[str]:
     base = (aoi or _J2_DEFAULT_AOI).strip()
-    terms = [
-        f'{base} GNSS jamming GPS interference aviation',
-        f'{base} GPS jamming spoofing GNSS',
-        'Mogadishu FIR GNSS jamming spoofing GPS interference',
-        'Somalia GNSS jamming GPS interference aviation',
-        'HCSM Mogadishu GNSS jamming spoofing',
-    ]
+    if _j2_is_uk_aoi(base):
+        terms = [
+            f"{base} GNSS GPS interference aviation",
+            f"{base} RF interference communications outage aviation",
+            f"{base} drone airport disruption security",
+            "United Kingdom GNSS interference aviation GPS jamming",
+            "Lincolnshire aviation security communications disruption",
+        ]
+    else:
+        terms = [
+            f'{base} GNSS jamming GPS interference aviation',
+            f'{base} GPS jamming spoofing GNSS',
+            'Mogadishu FIR GNSS jamming spoofing GPS interference',
+            'Somalia GNSS jamming GPS interference aviation',
+            'HCSM Mogadishu GNSS jamming spoofing',
+        ]
     seen: set[str] = set()
     out: list[str] = []
     for term in terms:
@@ -4794,7 +5375,7 @@ def _j2_dedupe_articles(items: list[dict[str, _J2Any]], limit: int = 20) -> list
 
 
 def _j2_news_payload(aoi: str, live: bool, limit: int, force: bool = False) -> dict[str, _J2Any]:
-    aoi = (aoi or _J2_DEFAULT_AOI).strip() or _J2_DEFAULT_AOI
+    aoi = mission_aoi_query_text(aoi, default=_J2_DEFAULT_AOI)
     limit = max(1, min(int(limit), 50))
     cache_path = _j2_news_cache_path(aoi)
     cached = _j2_read_json(cache_path)
@@ -4815,6 +5396,9 @@ def _j2_news_payload(aoi: str, live: bool, limit: int, force: bool = False) -> d
         live_items, live_errors = _j2_fetch_live_articles(aoi, limit=limit)
 
     cached_items = cached.get("articles", []) if isinstance(cached, dict) else []
+    for item in [*live_items, *cached_items]:
+        if isinstance(item, dict) and not item.get("aoi"):
+            item["aoi"] = aoi
     register_items = _j2_source_register(aoi)
     items = _j2_dedupe_articles(live_items + cached_items + register_items, limit=limit)
     live_count = sum(1 for item in items if item.get("live"))
@@ -4864,7 +5448,7 @@ def api_j2_health() -> dict[str, _J2Any]:
             "/api/j2/cache",
             "/api/j2/report.html",
             "/api/j2/export.csv",
-            "/api/mission/report-jsp101.html",
+            "/api/mission/report-jsp101.html?period=day&max_rows=60000&step_minutes=30",
         ],
     }
 
@@ -4978,6 +5562,7 @@ def api_j2_report(
     force: bool = False,
     limit: int = _J2Query(default=20, ge=1, le=50),
 ) -> dict[str, _J2Any]:
+    aoi = mission_aoi_query_text(aoi, default=_J2_DEFAULT_AOI)
     metrics = _j2_local_metrics(collection_id=collection_id, collection_ids=collection_ids)
     news_payload = _j2_news_payload(aoi=aoi, live=bool(live), limit=int(limit), force=bool(force))
     assessment = _j2_assessment_from_metrics(metrics, news_payload)
@@ -5015,7 +5600,7 @@ def api_j2_report(
         "news": news_payload,
         "articles": news_payload.get("articles", []),
         "sections": sections,
-        "jsp101_report_url": "/api/mission/report-jsp101.html",
+        "jsp101_report_url": "/api/mission/report-jsp101.html?period=day&max_rows=60000&step_minutes=30",
         "safety_boundary": "Decision-support only. Does not authorise flight, certify GNSS performance, or provide tactical targeting intelligence.",
         "limitations": [
             "MOTH data is event-based. No detection does not prove the band was empty.",
@@ -5076,7 +5661,7 @@ def api_j2_report_html() -> str:
 <!doctype html><html><head><meta charset='utf-8'><title>J2 Live Report Export</title>
 <style>body{{font-family:Arial,sans-serif;max-width:1100px;margin:24px auto;color:#111}}table{{width:100%;border-collapse:collapse;margin:12px 0}}td,th{{border:1px solid #bbb;padding:6px;text-align:left;vertical-align:top}}th{{background:#17365d;color:#fff}}.warn{{border-left:5px solid #b42318;padding:8px;background:#fff8f8}}small{{color:#555}}@media print{{button{{display:none}}}}</style></head><body>
 <button onclick='window.print()'>Print / save PDF</button>
-<h1>EEI LANTERN J2 Live Report</h1>
+<h1>LANTERN J2 Live Report</h1>
 <p>Generated UTC: {esc(data.get('generated_utc'))} | AOI: {esc(data.get('aoi'))}</p>
 <h2>Executive summary</h2><p><b>{esc(data.get('headline'))}</b></p><p>{esc(data.get('current_judgement'))}</p><p><b>Recommended action:</b> {esc(data.get('recommended_action'))}</p>
 <h2>Cards</h2><table><tr><th>Card</th><th>Value</th><th>Detail</th></tr>{cards}</table>
@@ -5117,9 +5702,9 @@ def api_j2_live_alias(aoi: str = _J2_DEFAULT_AOI, collection_ids: str | None = N
 def api_j2_summary_alias(aoi: str = _J2_DEFAULT_AOI, collection_ids: str | None = None) -> dict[str, _J2Any]:
     return api_j2_report(aoi=aoi, collection_ids=collection_ids, live=False, force=False)
 
-# ---- end EEI LANTERN v0.11.3 J2 Live Article Rotator API ----
+# ---- end LANTERN v0.11.3 J2 Live Article Rotator API ----
 
-# ---- EEI LANTERN v0.11.4a J2 Threat Actors endpoint hotfix ----
+# ---- LANTERN v0.11.4a J2 Threat Actors endpoint hotfix ----
 # Restores /api/j2/threat-actors when the v0.11.4 static J2 page is present but the route was not registered.
 # This is deliberately self-contained and uses existing /api/j2/news when available.
 
@@ -5135,7 +5720,7 @@ from typing import Any as _J2HFAny
 from fastapi import Query as _J2HFQuery
 
 _J2HF_VERSION = "0.11.4a"
-_J2HF_DEFAULT_AOI = "Aden Adde / Mogadishu"
+_J2HF_DEFAULT_AOI = "Lincoln, UK"
 
 
 def _j2hf_now() -> str:
@@ -5165,6 +5750,75 @@ def _j2hf_pub_to_iso(value: _J2HFAny) -> str | None:
 
 
 def _j2hf_source_register(aoi: str = _J2HF_DEFAULT_AOI) -> list[dict[str, _J2HFAny]]:
+    if _j2_is_uk_aoi(aoi):
+        return [
+            {
+                "title": "UK Civil Aviation Authority",
+                "source": "UK CAA",
+                "url": "https://www.caa.co.uk/",
+                "published_utc": None,
+                "category": "Aviation / Official",
+                "confidence": "official-source",
+                "summary": "Official UK aviation regulator source for aviation safety, airspace and operational reference checks.",
+                "aoi": aoi,
+                "live": False,
+            },
+            {
+                "title": "NATS Aeronautical Information Service",
+                "source": "NATS AIS",
+                "url": "https://nats-uk.ead-it.com/",
+                "published_utc": None,
+                "category": "Aviation / Official",
+                "confidence": "official-source",
+                "summary": "UK aeronautical information source family for NOTAM, AIP and flight-planning context where applicable.",
+                "aoi": aoi,
+                "live": False,
+            },
+            {
+                "title": "Ofcom spectrum interference support",
+                "source": "Ofcom",
+                "url": "https://www.ofcom.org.uk/spectrum/interference/",
+                "published_utc": None,
+                "category": "RF / Communications",
+                "confidence": "official-source",
+                "summary": "UK spectrum regulator reference for interference handling and radio-spectrum context.",
+                "aoi": aoi,
+                "live": False,
+            },
+            {
+                "title": "EASA GNSS outages and alterations watch page",
+                "source": "EASA",
+                "url": "https://www.easa.europa.eu/en/domains/air-operations/global-navigation-satellite-system-outages-and-alterations",
+                "published_utc": None,
+                "category": "GNSS/RF",
+                "confidence": "source-register",
+                "summary": "Official aviation safety watch page for GNSS jamming/spoofing affected areas. Treat as context, not local receiver proof.",
+                "aoi": aoi,
+                "live": False,
+            },
+            {
+                "title": "GPSJam daily GPS/GNSS interference map",
+                "source": "GPSJam",
+                "url": "https://gpsjam.org/",
+                "published_utc": None,
+                "category": "GNSS/RF",
+                "confidence": "indicator",
+                "summary": "ADS-B-derived GPS/GNSS interference map. Useful daily watch item, but not a direct local MOTH measurement.",
+                "aoi": aoi,
+                "live": False,
+            },
+            {
+                "title": "Lincolnshire Police news",
+                "source": "Lincolnshire Police",
+                "url": "https://www.lincs.police.uk/news/lincolnshire/news/",
+                "published_utc": None,
+                "category": "Security / Local",
+                "confidence": "official-source",
+                "summary": "Local public security context for Lincolnshire. Use as source-linked awareness, not RF attribution.",
+                "aoi": aoi,
+                "live": False,
+            },
+        ]
     return [
         {
             "title": "EASA Somalia conflict-zone information bulletin",
@@ -5259,6 +5913,14 @@ def _j2hf_source_register(aoi: str = _J2HF_DEFAULT_AOI) -> list[dict[str, _J2HFA
 
 def _j2hf_query_terms(aoi: str) -> list[str]:
     base = (aoi or _J2HF_DEFAULT_AOI).strip()
+    if _j2_is_uk_aoi(base):
+        return [
+            f"{base} aviation security GNSS RF interference",
+            f"{base} Lincolnshire police aviation airport security",
+            f"{base} communications outage RF interference",
+            f"{base} drone airport disruption security",
+            "United Kingdom GNSS GPS interference aviation security",
+        ]
     return [
         f"Al-Shabaab Somalia Mogadishu Aden Adde security aviation {base}",
         f"ISIS-Somalia OR Islamic State Somalia Puntland Mogadishu {base}",
@@ -5302,7 +5964,7 @@ def _j2hf_fetch_news_rss(query: str, limit: int = 10) -> list[dict[str, _J2HFAny
             "category": _j2hf_category_for_text(title + " " + desc),
             "confidence": "live-news",
             "summary": desc[:360] if desc else "Live news/search result. Verify source details before briefing.",
-            "aoi": _J2HF_DEFAULT_AOI,
+            "aoi": query,
             "live": True,
         })
         if len(out) >= int(limit):
@@ -5379,6 +6041,54 @@ def _j2hf_threat_articles(aoi: str, live: bool, force: bool, limit: int) -> list
 
 
 def _j2hf_actor_catalog(aoi: str) -> list[dict[str, _J2HFAny]]:
+    if _j2_is_uk_aoi(aoi):
+        return [
+            {
+                "actor": "Local civil aviation / airspace operating context",
+                "type": "Official aviation and airspace context",
+                "area_relevance": "Lincolnshire and wider UK aviation watch line for airspace, NOTAM, airfield and tasking constraints.",
+                "current_assessment": "Check UK CAA, NATS AIS, NOTAM/AIP material and task-specific aviation coordination before any GPS-dependent or RF-sensitive activity.",
+                "j2_relevance": "Primary official-source context for lawful and safe operating decisions in the Lincoln AOI.",
+                "aviation_rf_relevance": "Direct relevance to aviation safety, airspace coordination and GNSS/RF operating assumptions.",
+                "confidence": "OFFICIAL/SOURCE-LINKED",
+            },
+            {
+                "actor": "Spectrum interference / communications disruption source",
+                "type": "Unattributed technical/risk bucket",
+                "area_relevance": "Used when MOTH/GNSS anomalies or public-source reports suggest local RF, GNSS or communications disruption.",
+                "current_assessment": "Keep technical observations separate from actor attribution. Use Ofcom, receiver telemetry and local validation before making an interference conclusion.",
+                "j2_relevance": "Prevents unsupported attribution while still flagging a technical risk line for the AOI.",
+                "aviation_rf_relevance": "Directly relevant to GNSS serviceability checks, receiver validation and RF risk reporting.",
+                "confidence": "TECHNICAL OBSERVATION ONLY",
+            },
+            {
+                "actor": "Local security / policing context",
+                "type": "Public safety and operating environment context",
+                "area_relevance": "Lincolnshire public-safety reporting, incidents, cordons, events and local disruption that could affect access or deployment.",
+                "current_assessment": "Use Lincolnshire Police and reputable local reporting as source-linked local awareness. Do not infer RF attribution from policing context.",
+                "j2_relevance": "Relevant to site access, local disruption, public-safety constraints and operational planning.",
+                "aviation_rf_relevance": "Indirect relevance where local disruption affects the task area, route, airfield access or deployment conditions.",
+                "confidence": "SOURCE-LINKED",
+            },
+            {
+                "actor": "Drone / UAS disruption watch line",
+                "type": "Airfield and public-safety disruption context",
+                "area_relevance": "Track only where source reporting links UAS activity, restrictions or airport disruption to Lincolnshire or the selected AOI.",
+                "current_assessment": "Keep as a watch bucket for aviation/security context. Escalate only with source-linked timing and location.",
+                "j2_relevance": "Useful for aviation task risk awareness and wider operating constraints.",
+                "aviation_rf_relevance": "Potential relevance to airspace restrictions and task safety; no automatic GNSS/RF attribution.",
+                "confidence": "LOW TO MEDIUM - SOURCE DEPENDENT",
+            },
+            {
+                "actor": "Unknown RF/GNSS interference source",
+                "type": "Unattributed technical/risk bucket",
+                "area_relevance": "Used when RF/GNSS anomalies exist but no source-supported actor attribution exists.",
+                "current_assessment": "Strong GNSS-band detections or receiver symptoms show RF risk; they do not identify who caused it.",
+                "j2_relevance": "Maintains a defensible boundary between measured effects and public-source attribution.",
+                "aviation_rf_relevance": "Directly relevant to GNSS serviceability, safety checks and technical reporting.",
+                "confidence": "TECHNICAL OBSERVATION ONLY",
+            },
+        ]
     return [
         {
             "actor": "Al-Shabaab",
@@ -5429,13 +6139,44 @@ def _j2hf_actor_catalog(aoi: str) -> list[dict[str, _J2HFAny]]:
 
 
 def _j2hf_payload(aoi: str, live: bool, force: bool, limit: int) -> dict[str, _J2HFAny]:
+    aoi = mission_aoi_query_text(aoi, default=_J2HF_DEFAULT_AOI)
     articles = _j2hf_threat_articles(aoi, live, force, limit)
     live_count = sum(1 for a in articles if bool(a.get("live")))
     actors = _j2hf_actor_catalog(aoi)
     al_count = sum(1 for a in articles if "shabaab" in str(a.get("title", "") + " " + a.get("summary", "")).lower())
     isis_count = sum(1 for a in articles if any(k in str(a.get("title", "") + " " + a.get("summary", "")).lower() for k in ["isis", "islamic state", "daesh"]))
-    official_count = sum(1 for a in articles if "official" in str(a.get("confidence", "")).lower() or str(a.get("source", "")).lower() in {"easa", "easa czib", "un security council", "us department of state", "scaa eaip"})
+    official_sources = {
+        "easa",
+        "easa czib",
+        "un security council",
+        "us department of state",
+        "scaa eaip",
+        "uk caa",
+        "nats ais",
+        "ofcom",
+        "met office",
+        "lincolnshire police",
+    }
+    official_count = sum(1 for a in articles if "official" in str(a.get("confidence", "")).lower() or str(a.get("source", "")).lower() in official_sources)
     confidence = "LIVE" if live_count else "SOURCE-REGISTER"
+    if _j2_is_uk_aoi(aoi):
+        brief_lines = [
+            "Primary watch line: UK aviation, airspace and local operating context for the Lincoln AOI.",
+            "RF/GNSS watch line: use Ofcom, receiver telemetry, MOTH scans and independent GNSS checks before making any interference conclusion.",
+            "Local security context: track Lincolnshire public-safety reporting and any source-linked disruption affecting access, airspace or deployment.",
+            "Attribution boundary: MOTH detections and receiver symptoms can indicate RF risk, but they do not identify an actor without separate source-supported attribution.",
+            f"Source basis: {len(articles)} article/source item(s), {live_count} live item(s), {official_count} official/source-register item(s).",
+        ]
+        attribution_boundary = "Do not attribute GNSS jamming, spoofing, VHF interference, or strong RF detections to any actor or cause unless a cited source and the technical evidence explicitly support that attribution. Keep RF observations and J2 context separated."
+    else:
+        brief_lines = [
+            f"Primary actor watch: Al-Shabaab remains the main Mogadishu / Aden Adde security-context watch line. Source-linked items in feed: {al_count}.",
+            f"Secondary actor watch: ISIS-Somalia / Islamic State Somalia is tracked separately and should be geographically checked before applying it to the AOI. Source-linked items in feed: {isis_count}.",
+            "State/security context: track SCAA/eAIP/NOTAMs, airport permission, checkpoint/cordon changes, and current security-force operations before task execution.",
+            "RF/GNSS attribution boundary: MOTH detections and receiver symptoms can indicate RF risk, but they do not identify an actor without separate source-supported attribution.",
+            f"Source basis: {len(articles)} article/source item(s), {live_count} live item(s), {official_count} official/source-register item(s).",
+        ]
+        attribution_boundary = "Do not attribute GNSS jamming, spoofing, VHF interference, or strong RF detections to Al-Shabaab, ISIS-Somalia, a state actor, or any other actor unless a cited source explicitly supports that attribution. Keep RF observations and J2 actor assessment separated."
     return {
         "status": "ok",
         "j2_api_version": _J2HF_VERSION,
@@ -5460,14 +6201,8 @@ def _j2hf_payload(aoi: str, live: bool, force: bool, limit: int) -> dict[str, _J
             }
             for a in articles
         ],
-        "brief_lines": [
-            f"Primary actor watch: Al-Shabaab remains the main Mogadishu / Aden Adde security-context watch line. Source-linked items in feed: {al_count}.",
-            f"Secondary actor watch: ISIS-Somalia / Islamic State Somalia is tracked separately and should be geographically checked before applying it to the AOI. Source-linked items in feed: {isis_count}.",
-            "State/security context: track SCAA/eAIP/NOTAMs, airport permission, checkpoint/cordon changes, and current security-force operations before task execution.",
-            "RF/GNSS attribution boundary: MOTH detections and receiver symptoms can indicate RF risk, but they do not identify an actor without separate source-supported attribution.",
-            f"Source basis: {len(articles)} article/source item(s), {live_count} live item(s), {official_count} official/source-register item(s).",
-        ],
-        "attribution_boundary": "Do not attribute GNSS jamming, spoofing, VHF interference, or strong RF detections to Al-Shabaab, ISIS-Somalia, a state actor, or any other actor unless a cited source explicitly supports that attribution. Keep RF observations and J2 actor assessment separated.",
+        "brief_lines": brief_lines,
+        "attribution_boundary": attribution_boundary,
         "limitations": [
             "This endpoint provides public-source J2 awareness and source links. It is not tactical targeting intelligence.",
             "Live news search can fail because of network, proxy, or provider restrictions; source-register links remain available offline.",
@@ -5515,9 +6250,9 @@ def api_j2_threat_news_hotfix(
         "source_log": payload.get("source_log", []),
     }
 
-# ---- end EEI LANTERN v0.11.4a J2 Threat Actors endpoint hotfix ----
+# ---- end LANTERN v0.11.4a J2 Threat Actors endpoint hotfix ----
 
-# ---- EEI LANTERN v0.11.6 J2 platform status compatibility layer ----
+# ---- LANTERN v0.11.6 J2 platform status compatibility layer ----
 # Purpose: keep the platform status panel working after rollback of the mistaken v0.11.1 /rotator page.
 # This does NOT restore the old /rotator route. The active J2 live article rotator remains /static/j2_report.html.
 
@@ -5605,9 +6340,9 @@ def lantern_j2_live_check() -> dict[str, _J2StatusAny]:
 def lantern_j2_rotator_check_compat() -> dict[str, _J2StatusAny]:
     return _j2_status_payload()
 
-# ---- end EEI LANTERN v0.11.6 J2 platform status compatibility layer ----
+# ---- end LANTERN v0.11.6 J2 platform status compatibility layer ----
 
-# ---- EEI LANTERN v0.12.0 Navigation Rationalisation layer ----
+# ---- LANTERN v0.12.2 Tactical UI / Mapping Header Hotfix layer ----
 # Primary navigation = end-state reporting and decision support.
 # Secondary stack = engineering / analyst evidence generation.
 # Additive UI routing only. Does not change RF scoring, import quality, J2 feed logic, or GNSS calculations.
@@ -5621,8 +6356,8 @@ import sys as _v012_sys
 
 from fastapi.responses import HTMLResponse as _V012HTMLResponse
 
-_LANTERN_PLATFORM_VERSION = "0.12.0"
-_V012_START_MARKER = "EEI LANTERN v0.12.0 Navigation Rationalisation layer"
+_LANTERN_PLATFORM_VERSION = "0.12.2"
+_V012_START_MARKER = "LANTERN v0.12.2 Tactical UI / Mapping Header Hotfix layer"
 
 
 def _v012_now() -> str:
@@ -5636,12 +6371,107 @@ def _v012_static_dir() -> _V012Path:
         return _V012Path(__file__).with_name("static")
 
 
-def _v012_static_page(name: str, fallback_title: str = "EEI LANTERN") -> str:
+def _v012_static_page(name: str, fallback_title: str = "LANTERN") -> str:
     p = _v012_static_dir() / name
     if p.exists():
         return p.read_text(encoding="utf-8", errors="replace")
-    return f"""<!doctype html><html><head><meta charset='utf-8'><title>{fallback_title}</title></head><body><h1>{fallback_title}</h1><p>Missing static page: {name}</p><p><a href='/app?v=012'>Return to LANTERN Home</a></p></body></html>"""
+    return f"""<!doctype html><html><head><meta charset='utf-8'><title>{fallback_title}</title></head><body><h1>{fallback_title}</h1><p>Missing static page: {name}</p><p><a href='/app?v=0122'>Return to LANTERN Home</a></p></body></html>"""
 
+
+def _v012_frame_page(title: str, source_url: str, nav_group: str) -> str:
+    """Render a canonical route as one platform shell plus an embedded legacy working page.
+
+    v0.12.2 uses a flex column wrapper so the global shell can never sit on top of
+    the working map/RF/J2 page. The legacy page is loaded with eei_embed=1 so it
+    does not mount a second platform shell.
+    """
+    safe_title = str(title).replace("<", "&lt;").replace(">", "&gt;")
+    src = source_url
+    sep = "&" if "?" in src else "?"
+    if "eei_embed=1" not in src:
+        src = f"{src}{sep}eei_embed=1"
+    legacy_kind = "map" if ("index.html" in src or "#candidates" in src) else "legacy"
+    if "launch_analysis" in src:
+        legacy_kind = "rf"
+    elif "j2_report" in src:
+        legacy_kind = "j2"
+    elif "lantern_flight_safety" in src:
+        legacy_kind = "flight-safety"
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>{safe_title}</title>
+<link rel="stylesheet" href="/static/platform_shell.css?v=0127" />
+<style>
+html,body{{margin:0;height:100%;overflow:hidden;background:#151b22}}
+body[data-lantern-wrapper="true"]{{display:flex;flex-direction:column;min-height:100vh}}
+.noscript{{color:#dfe6ed;background:#202830;border:1px solid #56616d;padding:12px;margin:12px;border-radius:8px}}
+</style>
+</head><body data-lantern-wrapper="true" data-nav-group="{nav_group}" data-legacy-kind="{legacy_kind}">
+<noscript><div class="noscript">JavaScript is required for the LANTERN platform shell. Open the legacy page directly: <a href="{src}">{safe_title}</a></div></noscript>
+<main class="eei-frame-stage" aria-label="{safe_title}">
+  <iframe id="eeiLegacyFrame" title="{safe_title}" src="{src}" loading="eager"></iframe>
+</main>
+<script>
+(function(){{
+  function textOf(el){{ return (el && (el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('href') || '') || '').replace(/\\s+/g,' ').trim(); }}
+  function hideDeprecatedControls(doc){{
+    var badText=/\\bLANTERN\\s*FLOW\\b|\\bLANTERNFLOW\\b|\\bFLOW\\s*BUTTON\\b/i;
+    var badHref=/lantern[_-]?flow|flow\\.html|\\/flow(?:\\?|#|$)/i;
+    doc.querySelectorAll('a,button,[role="button"]').forEach(function(el){{
+      var t=textOf(el);
+      var href=el.getAttribute('href')||'';
+      if(badText.test(t) || badHref.test(href)){{ el.style.setProperty('display','none','important'); el.setAttribute('aria-hidden','true'); }}
+    }});
+  }}
+  function tidyFrame(){{
+    var frame=document.getElementById('eeiLegacyFrame');
+    if(!frame) return;
+    try{{
+      var doc=frame.contentDocument || frame.contentWindow.document;
+      if(!doc || !doc.documentElement) return;
+      var kind=document.body.getAttribute('data-legacy-kind') || 'legacy';
+      doc.documentElement.classList.add('eei-embedded-legacy');
+      doc.body && doc.body.classList.add('eei-embedded-legacy-body','eei-embedded-' + kind);
+      if(!doc.getElementById('eei-embedded-cleanup-style')){{
+        var style=doc.createElement('style');
+        style.id='eei-embedded-cleanup-style';
+        style.textContent = `
+          #eei-app-shell,.eei-platform-shell,.platform-shell{{display:none!important}}
+          html.eei-embedded-legacy,html.eei-embedded-legacy body{{margin:0!important;padding:0!important;background:#151b22!important;color:#dde4eb!important}}
+          .lantern-flow,#lanternFlow,#lantern-flow,[data-lantern-flow],.eei-lantern-flow,.flow-button{{display:none!important}}
+          a[href*="flow"],button[title*="Flow"],button[aria-label*="Flow"]{{display:none!important}}
+          body.eei-embedded-legacy-body .hero,body.eei-embedded-legacy-body header.hero{{background:linear-gradient(90deg,rgba(198,206,214,.075),rgba(34,42,50,.11) 42%,rgba(57,96,131,.08)),linear-gradient(90deg,rgba(255,255,255,.085),rgba(255,255,255,.025) 22%,rgba(0,0,0,.09) 52%,rgba(255,255,255,.05) 84%,rgba(255,255,255,.02)),linear-gradient(180deg,#3b434c,#252c34 52%,#1a2027)!important;border-bottom:1px solid #65717d!important}}
+          body.eei-embedded-legacy-body .card,body.eei-embedded-legacy-body .panel,body.eei-embedded-legacy-body .box,body.eei-embedded-legacy-body .side{{background:linear-gradient(135deg,rgba(255,255,255,.032),transparent 30%),linear-gradient(180deg,#242c35,#192028 72%,#151a21)!important;border-color:#56616d!important;border-radius:8px!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.055),0 8px 18px rgba(0,0,0,.20)!important}}
+          body.eei-embedded-legacy-body button,body.eei-embedded-legacy-body .btn,body.eei-embedded-legacy-body input,body.eei-embedded-legacy-body select{{border-radius:6px!important}}
+          body.eei-embedded-legacy-body button,body.eei-embedded-legacy-body .btn{{border-color:#708292!important;background:linear-gradient(90deg,rgba(185,207,226,.10),rgba(63,111,154,.18) 32%,rgba(28,61,91,.18) 74%,rgba(222,230,236,.08)),linear-gradient(180deg,#345f87,#23435f)!important;color:#edf3f8!important;font-weight:900!important}}
+          body.eei-embedded-map header,body.eei-embedded-map .page-header,body.eei-embedded-map .topbar,body.eei-embedded-map .navbar,body.eei-embedded-map .platform-top,body.eei-embedded-map .old-header{{display:none!important}}
+          body.eei-embedded-map{{overflow:hidden!important}}
+          body.eei-embedded-map #map,body.eei-embedded-map #mapid,body.eei-embedded-map .leaflet-container{{top:0!important}}
+        `;
+        doc.head.appendChild(style);
+      }}
+      var hideLabels=/^(Home|LANTERN Home|LANTERN Flow|Analyst Launch RF|Map \\/ Candidates|API Health)$/i;
+      doc.querySelectorAll('a,button,[role="button"]').forEach(function(el){{
+        var t=textOf(el);
+        if(hideLabels.test(t)){{el.style.setProperty('display','none','important');el.setAttribute('aria-hidden','true');}}
+      }});
+      hideDeprecatedControls(doc);
+      if(!doc.__eeiLegacyObserver && doc.documentElement && doc.documentElement.nodeType===1){{
+        var LegacyObserver = (doc.defaultView && doc.defaultView.MutationObserver) || MutationObserver;
+        doc.__eeiLegacyObserver = new LegacyObserver(function(){{ hideDeprecatedControls(doc); }});
+        doc.__eeiLegacyObserver.observe(doc.documentElement,{{childList:true,subtree:true,characterData:true}});
+      }}
+    }}catch(e){{}}
+  }}
+  document.addEventListener('DOMContentLoaded', function(){{
+    var f=document.getElementById('eeiLegacyFrame');
+    if(f) f.addEventListener('load', function(){{ setTimeout(tidyFrame, 60); setTimeout(tidyFrame, 250); setTimeout(tidyFrame, 900); }});
+    setInterval(tidyFrame, 1500);
+  }});
+}})();
+</script>
+<script src="/static/platform_shell.js?v=0127" defer></script>
+</body></html>"""
 
 def _v012_route_exists(path: str) -> bool:
     try:
@@ -5669,37 +6499,37 @@ def _v012_page_exists(url: str) -> bool:
 
 def _v012_nav_registry() -> dict[str, _V012Any]:
     primary = [
-        {"key": "home", "title": "Home", "url": "/app?v=012", "description": "Platform landing page and workflow map."},
-        {"key": "context", "title": "Mission Context", "url": "/context?v=012", "description": "AOI, collections, time window and data quality status."},
-        {"key": "reporting", "title": "Reporting", "url": "/reporting?v=012", "description": "End-state flight safety, operations, J2 and export pages."},
-        {"key": "engineering", "title": "Engineering", "url": "/engineering?v=012", "description": "Technical evidence, RF analysis, map layers and diagnostics."},
-        {"key": "system", "title": "System", "url": "/system?v=012", "description": "Health, deployment checks, logs and app map."},
+        {"key": "home", "title": "Home", "url": "/app?v=0122", "description": "Platform landing page and workflow map."},
+        {"key": "context", "title": "Mission Context", "url": "/context?v=0122", "description": "AOI, collections, time window and data quality status."},
+        {"key": "reporting", "title": "Reporting", "url": "/reporting?v=0122", "description": "End-state flight safety, operations, J2 and export pages."},
+        {"key": "engineering", "title": "Engineering", "url": "/engineering?v=0122", "description": "Technical evidence, RF analysis, map layers and diagnostics."},
+        {"key": "system", "title": "System", "url": "/system?v=0122", "description": "Health, deployment checks, logs and app map."},
     ]
     sections = {
         "reporting": [
-            {"key": "flight-safety", "title": "Flight Safety Brief", "url": "/reporting/flight-safety?v=012", "legacy_url": "/lantern?v=012", "description": "Pilot-facing GNSS/RF burden and clearest observed constellation/band."},
-            {"key": "mission-brief", "title": "Mission Operations Brief", "url": "/reporting/mission-brief?v=012", "legacy_url": "/static/mission_brief.html?v=091", "description": "Senior/ops readiness summary, caveats and decision-support brief."},
-            {"key": "j2", "title": "J2 Live Report", "url": "/reporting/j2?v=012", "legacy_url": "/static/j2_report.html?v=115", "description": "OSINT articles, threat actors, aviation/security context and source log."},
-            {"key": "gnss-serviceability", "title": "GNSS Serviceability", "url": "/reporting/gnss-serviceability?v=012", "description": "GPS/GNSS serviceability decision support and required receiver checks."},
-            {"key": "candidate-report", "title": "Candidate Site Report", "url": "/reporting/candidate?v=012", "description": "End-state antenna/candidate report and PDF entry point."},
-            {"key": "evidence-log", "title": "Source / Evidence Log", "url": "/reporting/evidence-log?v=012", "description": "Traceable collections, OSINT/source items and evidence register."},
-            {"key": "export-pack", "title": "Export Pack", "url": "/reporting/export?v=012", "description": "Mission report, J2 source log, candidate assessment and archive links."},
+            {"key": "flight-safety", "title": "Flight Safety Brief", "url": "/reporting/flight-safety?v=0122", "legacy_url": "/lantern?v=0122", "description": "Pilot-facing GNSS/RF burden and clearest observed constellation/band."},
+            {"key": "mission-brief", "title": "Mission Operations Brief", "url": "/reporting/mission-brief?v=0122", "legacy_url": "/static/mission_brief.html?v=092", "description": "Senior/ops readiness summary, caveats and decision-support brief."},
+            {"key": "j2", "title": "J2 Live Report", "url": "/reporting/j2?v=0122", "legacy_url": "/static/j2_report.html?v=115", "description": "OSINT articles, threat actors, aviation/security context and source log."},
+            {"key": "gnss-serviceability", "title": "GNSS Serviceability", "url": "/reporting/gnss-serviceability?v=0122", "description": "GPS/GNSS serviceability decision support and required receiver checks."},
+            {"key": "candidate-report", "title": "Candidate Site Report", "url": "/reporting/candidate?v=0122", "description": "End-state antenna/candidate report and PDF entry point."},
+            {"key": "evidence-log", "title": "Source / Evidence Log", "url": "/reporting/evidence-log?v=0122", "description": "Traceable collections, OSINT/source items and evidence register."},
+            {"key": "export-pack", "title": "Export Pack", "url": "/reporting/export?v=0122", "description": "Mission report, J2 source log, candidate assessment and archive links."},
         ],
         "engineering": [
-            {"key": "data-quality", "title": "Data Quality Detail", "url": "/engineering/data-quality?v=012", "legacy_url": "/static/data_quality.html?v=080", "description": "Import quality, scan coverage, reject/flag detail and confidence."},
-            {"key": "rf", "title": "RF Analyst", "url": "/engineering/rf?v=012", "legacy_url": "/static/launch_analysis.html?v=075", "description": "Launch windows, L1/L2/L5 timelines, spectrum/spikes and pattern-of-life."},
-            {"key": "spectrum", "title": "Spectrum / Spikes", "url": "/engineering/spectrum?v=012", "legacy_url": "/static/launch_analysis.html?v=075#spectrum", "description": "Technical spectrum bins, dBm values, busy frequencies and abnormal spikes."},
-            {"key": "map", "title": "Map / H3 Layers", "url": "/engineering/map?v=012", "legacy_url": "/?v=012", "description": "Raw map, H3 layers, RF burden, suitability and confidence overlays."},
-            {"key": "candidates", "title": "Candidate Engineering", "url": "/engineering/candidates?v=012", "legacy_url": "/?v=012#candidates", "description": "Candidate scoring, comparison, evidence drill-down and engineering view."},
-            {"key": "pattern-of-life", "title": "Pattern of Life", "url": "/engineering/pattern-of-life?v=012", "description": "Recurring quiet/noisy periods by hour, day, week or month."},
-            {"key": "imports", "title": "Import Diagnostics", "url": "/engineering/import-diagnostics?v=012", "description": "CSV import, parser status, quality mode and source file notes."},
-            {"key": "api-viewer", "title": "API Payload Viewer", "url": "/engineering/api-viewer?v=012", "description": "Developer-facing endpoint/payload inspection without leaving the app."},
+            {"key": "data-quality", "title": "Data Quality Detail", "url": "/engineering/data-quality?v=0122", "legacy_url": "/static/data_quality.html?v=080", "description": "Import quality, scan coverage, reject/flag detail and confidence."},
+            {"key": "rf", "title": "RF Analyst", "url": "/engineering/rf?v=0122", "legacy_url": "/static/launch_analysis.html?v=075", "description": "Launch windows, L1/L2/L5 timelines, spectrum/spikes and pattern-of-life."},
+            {"key": "spectrum", "title": "Spectrum / Spikes", "url": "/engineering/spectrum?v=0122", "legacy_url": "/static/launch_analysis.html?v=075#spectrum", "description": "Technical spectrum bins, dBm values, busy frequencies and abnormal spikes."},
+            {"key": "map", "title": "Map / H3 Layers", "url": "/engineering/map?v=0122", "legacy_url": "/?v=0122", "description": "Raw map, H3 layers, RF burden, suitability and confidence overlays."},
+            {"key": "candidates", "title": "Candidate Engineering", "url": "/engineering/candidates?v=0122", "legacy_url": "/?v=0122#candidates", "description": "Candidate scoring, comparison, evidence drill-down and engineering view."},
+            {"key": "pattern-of-life", "title": "Pattern of Life", "url": "/engineering/pattern-of-life?v=0122", "description": "Recurring quiet/noisy periods by hour, day, week or month."},
+            {"key": "imports", "title": "Import Diagnostics", "url": "/engineering/import-diagnostics?v=0122", "description": "CSV import, parser status, quality mode and source file notes."},
+            {"key": "api-viewer", "title": "API Payload Viewer", "url": "/engineering/api-viewer?v=0122", "description": "Developer-facing endpoint/payload inspection without leaving the app."},
         ],
         "system": [
-            {"key": "status", "title": "System Status", "url": "/system/status?v=012", "description": "Runtime, database, static page and API status."},
-            {"key": "deploy-check", "title": "Deploy Check", "url": "/system/deploy-check?v=012", "legacy_url": "/api/platform/deploy-check", "description": "Runtime dependencies, static files and deployment readiness."},
-            {"key": "logs", "title": "Logs", "url": "/system/logs?v=012", "description": "Local stdout/stderr log file pointers and support checks."},
-            {"key": "app-map", "title": "App Map", "url": "/system/app-map?v=012", "description": "Current route map, overlap notes and canonical ownership."},
+            {"key": "status", "title": "System Status", "url": "/system/status?v=0122", "description": "Runtime, database, static page and API status."},
+            {"key": "deploy-check", "title": "Deploy Check", "url": "/system/deploy-check?v=0122", "legacy_url": "/api/platform/deploy-check", "description": "Runtime dependencies, static files and deployment readiness."},
+            {"key": "logs", "title": "Logs", "url": "/system/logs?v=0122", "description": "Local stdout/stderr log file pointers and support checks."},
+            {"key": "app-map", "title": "App Map", "url": "/system/app-map?v=0122", "description": "Current route map, overlap notes and canonical ownership."},
             {"key": "health-json", "title": "Health JSON", "url": "/api/platform/health", "description": "Raw platform health payload."},
         ],
     }
@@ -5788,7 +6618,7 @@ def _v012_static_file_checks() -> dict[str, bool]:
     static = _v012_static_dir()
     names = [
         "platform_home.html", "mission_context.html", "reporting_home.html", "engineering_home.html", "system_home.html", "app_map.html",
-        "api_viewer.html", "platform_shell.css", "platform_shell.js", "platform_navigation.json", "lantern_flight_safety.html",
+        "api_viewer.html", "platform_shell.css", "platform_shell.js", "platform_navigation.json", "eei_tactical_eagle.svg", "lantern_flight_safety.html",
         "mission_brief.html", "j2_report.html", "launch_analysis.html", "data_quality.html", "index.html",
     ]
     return {name: (static / name).exists() for name in names}
@@ -5810,122 +6640,127 @@ def _v012_route_payload() -> list[dict[str, _V012Any]]:
 
 @app.get("/app", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_platform_home() -> str:
-    return _v012_static_page("platform_home.html", "EEI LANTERN Platform Home")
+    return _v012_static_page("platform_home.html", "LANTERN Platform Home")
 
 
 @app.get("/context", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_context_page() -> str:
-    return _v012_static_page("mission_context.html", "EEI LANTERN Mission Context")
+    return _v012_static_page("mission_context.html", "LANTERN Mission Context")
 
 
 @app.get("/reporting", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_reporting_home() -> str:
-    return _v012_static_page("reporting_home.html", "EEI LANTERN Reporting")
+    return _v012_static_page("reporting_home.html", "LANTERN Reporting")
 
 
 @app.get("/engineering", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_engineering_home() -> str:
-    return _v012_static_page("engineering_home.html", "EEI LANTERN Engineering")
+    return _v012_static_page("engineering_home.html", "LANTERN Engineering")
 
 
 @app.get("/system", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_system_home() -> str:
-    return _v012_static_page("system_home.html", "EEI LANTERN System")
+    return _v012_static_page("system_home.html", "LANTERN System")
 
 
 @app.get("/reporting/flight-safety", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_reporting_flight_safety() -> str:
-    return _v012_static_page("lantern_flight_safety.html", "EEI LANTERN Flight Safety Brief")
+    return _v012_frame_page("LANTERN Flight Safety Brief", "/static/lantern_flight_safety.html?v=0122", "reporting")
 
 
 @app.get("/reporting/mission-brief", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_reporting_mission_brief() -> str:
-    return _v012_static_page("mission_brief.html", "EEI LANTERN Mission Operations Brief")
+    return _v012_frame_page("LANTERN Mission Operations Brief", "/static/mission_brief.html?v=092", "reporting")
 
 
 @app.get("/reporting/j2", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_reporting_j2() -> str:
-    return _v012_static_page("j2_report.html", "EEI LANTERN J2 Live Report")
+    return _v012_frame_page("LANTERN J2 Live Report", "/static/j2_report.html?v=115", "reporting")
+
+
+@app.get("/j2", include_in_schema=False)  # type: ignore[name-defined]
+def lantern_v012_legacy_j2_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/reporting/j2?v=0122", status_code=307)
 
 
 @app.get("/reporting/gnss-serviceability", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_reporting_gnss_serviceability() -> str:
-    return _v012_static_page("gnss_serviceability.html", "EEI LANTERN GNSS Serviceability")
+    return _v012_static_page("gnss_serviceability.html", "LANTERN GNSS Serviceability")
 
 
 @app.get("/reporting/candidate", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_reporting_candidate() -> str:
-    return _v012_static_page("candidate_report.html", "EEI LANTERN Candidate Site Report")
+    return _v012_static_page("candidate_report.html", "LANTERN Candidate Site Report")
 
 
 @app.get("/reporting/evidence-log", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_reporting_evidence_log() -> str:
-    return _v012_static_page("evidence_log.html", "EEI LANTERN Source / Evidence Log")
+    return _v012_static_page("evidence_log.html", "LANTERN Source / Evidence Log")
 
 
 @app.get("/reporting/export", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_reporting_export() -> str:
-    return _v012_static_page("export_pack.html", "EEI LANTERN Export Pack")
+    return _v012_static_page("export_pack.html", "LANTERN Export Pack")
 
 
 @app.get("/engineering/data-quality", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_engineering_data_quality() -> str:
-    return _v012_static_page("data_quality.html", "EEI LANTERN Data Quality Detail")
+    return _v012_frame_page("LANTERN Data Quality Detail", "/static/data_quality.html?v=080", "engineering")
 
 
 @app.get("/engineering/rf", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_engineering_rf() -> str:
-    return _v012_static_page("launch_analysis.html", "EEI LANTERN RF Analyst")
+    return _v012_frame_page("LANTERN RF Analyst", "/static/launch_analysis.html?v=075", "engineering")
 
 
 @app.get("/engineering/spectrum", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_engineering_spectrum() -> str:
-    return _v012_static_page("launch_analysis.html", "EEI LANTERN Spectrum / Spikes")
+    return _v012_frame_page("LANTERN Spectrum / Spikes", "/static/launch_analysis.html?v=075#spectrum", "engineering")
 
 
 @app.get("/engineering/map", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_engineering_map() -> str:
-    return _v012_static_page("index.html", "EEI LANTERN Map / H3 Layers")
+    return _v012_frame_page("LANTERN Map / H3 Layers", "/static/index.html?v=0122", "engineering")
 
 
 @app.get("/engineering/candidates", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_engineering_candidates() -> str:
-    return _v012_static_page("index.html", "EEI LANTERN Candidate Engineering")
+    return _v012_frame_page("LANTERN Candidate Engineering", "/static/index.html?v=0122#candidates", "engineering")
 
 
 @app.get("/engineering/pattern-of-life", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_engineering_pattern_of_life() -> str:
-    return _v012_static_page("pattern_of_life.html", "EEI LANTERN Pattern of Life")
+    return _v012_static_page("pattern_of_life.html", "LANTERN Pattern of Life")
 
 
 @app.get("/engineering/import-diagnostics", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_engineering_import_diagnostics() -> str:
-    return _v012_static_page("import_diagnostics.html", "EEI LANTERN Import Diagnostics")
+    return _v012_static_page("import_diagnostics.html", "LANTERN Import Diagnostics")
 
 
 @app.get("/engineering/api-viewer", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_engineering_api_viewer() -> str:
-    return _v012_static_page("api_viewer.html", "EEI LANTERN API Payload Viewer")
+    return _v012_static_page("api_viewer.html", "LANTERN API Payload Viewer")
 
 
 @app.get("/system/status", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_system_status() -> str:
-    return _v012_static_page("system_home.html", "EEI LANTERN System Status")
+    return _v012_static_page("system_home.html", "LANTERN System Status")
 
 
 @app.get("/system/deploy-check", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_system_deploy_check() -> str:
-    return _v012_static_page("system_home.html", "EEI LANTERN Deploy Check")
+    return _v012_static_page("system_home.html", "LANTERN Deploy Check")
 
 
 @app.get("/system/logs", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_system_logs() -> str:
-    return _v012_static_page("system_home.html", "EEI LANTERN Logs")
+    return _v012_static_page("system_home.html", "LANTERN Logs")
 
 
 @app.get("/system/app-map", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_system_app_map() -> str:
-    return _v012_static_page("app_map.html", "EEI LANTERN App Map")
+    return _v012_static_page("app_map.html", "LANTERN App Map")
 
 
 @app.get("/api/platform/navigation")  # type: ignore[name-defined]
@@ -5937,7 +6772,7 @@ def lantern_v012_platform_navigation() -> dict[str, _V012Any]:
         "generated_utc": _v012_now(),
         **registry,
         "notes": [
-            "Primary navigation is now Home, Mission Context, Reporting, Engineering, System.",
+            "Primary navigation is Home, Mission Context, Reporting, Engineering, System, with v0.12.2 tactical cobalt/carbon shell styling.",
             "Reporting owns end-state decision/reporting outputs.",
             "Engineering owns technical evidence generation, diagnostics and analyst tooling.",
             "Legacy URLs remain available as compatibility entry points.",
@@ -5949,11 +6784,14 @@ def lantern_v012_platform_navigation() -> dict[str, _V012Any]:
 def lantern_v012_platform_mission_context() -> dict[str, _V012Any]:
     db = _v012_db_summary()
     quality = _v012_quality_summary()
+    aoi_filter = _aoi_read_context()
     return {
         "status": "ok",
         "platform_version": _LANTERN_PLATFORM_VERSION,
         "generated_utc": _v012_now(),
-        "aoi": "Aden Adde / Mogadishu",
+        "aoi": aoi_filter.get("label") or _DEFAULT_AOI_LABEL,
+        "aoi_filter": aoi_filter,
+        "aoi_query": aoi_filter.get("j2_query") or aoi_filter.get("label") or _DEFAULT_AOI_LABEL,
         "collections": {
             "count": db.get("collection_count"),
             "selected": "all loaded unless page filter overrides",
@@ -5972,6 +6810,47 @@ def lantern_v012_platform_mission_context() -> dict[str, _V012Any]:
     }
 
 
+@app.get("/api/platform/aoi/search")  # type: ignore[name-defined]
+def lantern_v012_platform_aoi_search(
+    q: str = "",
+    limit: int = Query(default=8, ge=1, le=20),
+) -> dict[str, _V012Any]:
+    results = _aoi_search(q, limit=limit)
+    return {
+        "status": "ok",
+        "generated_utc": _v012_now(),
+        "query": q,
+        "results": results,
+        "result_count": len(results),
+        "guidance": "Results include known locations, fuzzy text matches, coordinates, and CSV coverage derived from uploaded collection bounds.",
+    }
+
+
+@app.post("/api/platform/mission-context")  # type: ignore[name-defined]
+def lantern_v012_platform_mission_context_update(payload: MissionContextIn) -> dict[str, _V012Any]:
+    if payload.lat is not None and payload.lon is not None:
+        matches = _aoi_search(payload.aoi or "", limit=1)
+        base = matches[0] if matches else {}
+        record = {
+            **base,
+            "label": payload.aoi or f"{payload.lat:.5f}, {payload.lon:.5f}",
+            "lat": payload.lat,
+            "lon": payload.lon,
+            "radius_m": payload.radius_m or 10000.0,
+            "j2_query": base.get("j2_query") or payload.aoi or f"{payload.lat:.5f} {payload.lon:.5f}",
+            "source": base.get("source") or "user",
+        }
+    else:
+        matches = _aoi_search(payload.aoi or "", limit=1)
+        if not matches:
+            raise HTTPException(status_code=400, detail="AOI not recognised. Use a search result or enter coordinates as lat, lon, radius_km.")
+        record = {**matches[0]}
+        if payload.radius_m is not None:
+            record["radius_m"] = payload.radius_m
+    _aoi_write_context(record)
+    return lantern_v012_platform_mission_context()
+
+
 @app.get("/api/platform/health")  # type: ignore[name-defined]
 def lantern_v012_platform_health() -> dict[str, _V012Any]:
     return {
@@ -5983,7 +6862,7 @@ def lantern_v012_platform_health() -> dict[str, _V012Any]:
         "database": _v012_db_summary(),
         "mission_context": "/api/platform/mission-context",
         "navigation_url": "/api/platform/navigation",
-        "home_url": "/app?v=012",
+        "home_url": "/app?v=0122",
         "route_count": len(_v012_route_payload()),
     }
 
@@ -6038,7 +6917,7 @@ def lantern_v012_platform_deploy_check() -> dict[str, _V012Any]:
         "warn_count": warn_count,
         "checks": checks,
         "deployment_guidance": [
-            "Use /app?v=012 as the only platform home.",
+            "Use /app?v=0122 as the only platform home.",
             "Use Reporting for end-state outputs.",
             "Use Engineering for technical evidence and diagnostics.",
             "Use Start_LANTERN_Local.ps1 or LANTERN_App.ps1 after deploy-check has no failures.",
@@ -6070,7 +6949,7 @@ def _v012_j2_live_payload() -> dict[str, _V012Any]:
             "j2_threat_actors": _v012_route_exists("/api/j2/threat-actors") or _v012_route_exists("/api/j2/threat_actors"),
             "legacy_rotator_route_removed": not _v012_route_exists("/rotator"),
         },
-        "urls": {"j2_live_report": "/reporting/j2?v=012", "legacy_rotator": "not used"},
+        "urls": {"j2_live_report": "/reporting/j2?v=0122", "legacy_rotator": "not used"},
         "note": "The display /rotator route is not used. The correct live article rotator is inside J2 Live Report.",
     }
 
@@ -6084,5 +6963,5 @@ def lantern_v012_j2_live_check() -> dict[str, _V012Any]:
 def lantern_v012_j2_rotator_check_compat() -> dict[str, _V012Any]:
     return _v012_j2_live_payload()
 
-# ---- end EEI LANTERN v0.12.0 Navigation Rationalisation layer ----
+# ---- end LANTERN v0.12.2 Tactical UI / Mapping Header Hotfix layer ----
 

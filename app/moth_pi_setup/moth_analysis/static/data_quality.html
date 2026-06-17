@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>MOTH Data Quality</title>
@@ -6,11 +6,12 @@
     body{margin:0;background:#10161b;color:#eef3f6;font-family:system-ui,-apple-system,Segoe UI,sans-serif}header{padding:22px 28px;background:#15222b;border-bottom:1px solid #33444f}main{padding:24px 28px;max-width:1280px;margin:auto}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}.card{background:#18242c;border:1px solid #33444f;border-radius:12px;padding:16px;margin-bottom:16px}.big{font-size:42px;font-weight:800}.muted{color:#aab7bf}table{width:100%;border-collapse:collapse;font-size:13px}td,th{border-bottom:1px solid #34434d;padding:7px;text-align:left;vertical-align:top}.pill{display:inline-block;padding:4px 9px;border-radius:99px;font-size:12px;font-weight:800}.GOOD{background:#1f8f4d}.MEDIUM{background:#c9831d}.LOW{background:#b43a35}.bar{height:14px;background:#283540;border-radius:8px;overflow:hidden}.fill{height:100%;background:linear-gradient(90deg,#b43a35,#c9831d,#1f8f4d)}button,a.button{display:inline-block;padding:10px 12px;border-radius:8px;border:0;background:#2d7fb8;color:white;text-decoration:none;font-weight:700}li{margin:6px 0}
   </style>
   <link rel="stylesheet" href="/static/lantern_nav.css" />
+  <link rel="stylesheet" href="/static/platform_shell.css?v=0127" />
 </head>
 <body>
 <header><h1>MOTH Data Quality Dashboard <span id="level" class="pill">...</span></h1><div class="muted">Use this before presenting antenna or launch-window results.</div></header>
 <main>
-  <p><a class="button" href="/static/home.html?v=080">Home</a> <a class="button" href="/static/briefing.html?v=080">Briefing Mode</a> <button onclick="load()">Refresh</button></p>
+  <p><a class="button" href="/app?v=0122">Home</a> <a class="button" href="/context?v=0122">Mission Context</a> <button onclick="load()">Refresh</button></p>
   <section id="top" class="grid"><div class="card">Loading...</div></section>
   <section class="card"><h2>Reasons and recommendations</h2><div id="reasons"></div></section>
   <section class="card"><h2>GNSS frequency coverage</h2><div id="coverage"></div></section>
@@ -28,7 +29,7 @@ async function load(){
     <div class="card"><div class="big">${d.score_0_100}</div><b>Quality score</b><div class="bar"><div class="fill" style="width:${d.score_0_100}%"></div></div><p>${d.headline}</p></div>
     <div class="card"><div class="big">${d.valid_percent}%</div><b>Valid rows</b><p class="muted">${d.totals.valid_events||0} valid / ${d.totals.total_events||0} total events.</p></div>
     <div class="card"><div class="big">${d.totals.collection_count||0}</div><b>Collections</b><p class="muted">First ${d.totals.first_timestamp_utc||'n/a'}<br>Last ${d.totals.last_timestamp_utc||'n/a'}</p></div>
-    <div class="card"><div class="big">${(d.time_gaps||[]).length}</div><b>Major time gaps</b><p class="muted">Gaps â‰¥30 minutes can hide patterns of life.</p></div>`;
+    <div class="card"><div class="big">${(d.time_gaps||[]).length}</div><b>Major time gaps</b><p class="muted">Gaps >=30 minutes can hide patterns of life.</p></div>`;
   document.getElementById('reasons').innerHTML='<h3>Reasons</h3><ul>'+d.reasons.map(r=>`<li>${esc(r)}</li>`).join('')+'</ul><h3>Recommended actions</h3><ul>'+d.recommendations.map(r=>`<li>${esc(r)}</li>`).join('')+'</ul><h3>Limitations</h3><ul>'+d.limitations.map(r=>`<li>${esc(r)}</li>`).join('')+'</ul>';
   document.getElementById('coverage').innerHTML=table(d.gnss_frequency_coverage);
   document.getElementById('collections').innerHTML=table(d.collections);
@@ -37,6 +38,6 @@ async function load(){
 load().catch(e=>document.getElementById('top').innerHTML=`<div class="card">${esc(e.message)}</div>`);
 </script>
   <script src="/static/lantern_nav.js"></script>
+  <script src="/static/platform_shell.js?v=0127" defer></script>
 </body>
 </html>
-

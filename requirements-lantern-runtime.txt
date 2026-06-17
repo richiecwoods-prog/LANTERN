@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+python-multipart
+orjson
+pydantic
+pandas
+h3
+pywebview
+pyinstaller

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Mission Context</title>
+  <style>
+    :root{--bg:#0b1220;--panel:#101a2b;--panel2:#16243a;--line:#2b3a52;--text:#e8eef7;--muted:#9fb0c5;--blue:#24669b;--good:#23a455;--amber:#d4a017;--bad:#d45050;--grey:#7a7f88}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif;line-height:1.42}
+    .hero{padding:28px 24px 18px;background:#07101e;border-bottom:1px solid var(--line)}.wrap{max-width:1440px;margin:0 auto;padding:18px 24px}.hero .wrap{padding:0 24px}
+    h1{margin:0;font-size:30px;letter-spacing:.04em}h2{font-size:18px;margin:0 0 10px}.sub,.small,.muted{color:var(--muted)}.sub{font-size:14px;margin-top:8px;max-width:980px}
+    .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}.card{grid-column:span 4;background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:15px}.span-12{grid-column:span 12}.span-6{grid-column:span 6}
+    @media(max-width:1000px){.card,.span-6{grid-column:span 12}}.btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.btn,button{display:inline-flex;align-items:center;justify-content:center;border:1px solid #316990;background:#1d4f7a;color:#fff;text-decoration:none;border-radius:9px;padding:9px 11px;font-size:13px;font-weight:800;cursor:pointer}.btn.secondary,button.secondary{background:#13233a;border-color:var(--line)}
+    input,select{width:100%;background:#0d1727;color:#fff;border:1px solid #2b3a52;border-radius:8px;padding:10px}.kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.kpi .box{background:#0d1727;border:1px solid var(--line);border-radius:10px;padding:10px}.kpi b{display:block;font-size:17px}.kpi span{font-size:11px;color:var(--muted)}
+    .aoiResult{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;border:1px solid var(--line);border-radius:9px;padding:10px;margin-top:8px;background:#0d1727}.tag{display:inline-flex;border:1px solid #2f4565;border-radius:999px;padding:3px 7px;font-size:11px;color:#dcecff;margin:2px;background:#0d1727}.status{white-space:pre-wrap;background:#0d1727;border:1px solid var(--line);border-radius:10px;padding:10px}
+    pre{white-space:pre-wrap;overflow:auto;max-height:360px}
+  </style>
+  <link rel="stylesheet" href="/static/platform_shell.css?v=0127" />
+</head>
+<body>
+  <section class="hero"><div class="wrap"><h1>Mission Context</h1><div class="sub">Shared AOI, collections, time window, quality status and assumptions.</div></div></section>
+  <main class="wrap">
+    <section class="grid">
+      <div class="card span-12">
+        <h2>Shared mission context</h2>
+        <p>The AOI saved here now drives the platform shell, J2 default intelligence query and map-layer filtering.</p>
+        <div id="ctxCards" class="kpi" style="margin-top:10px"><div class="box"><b>-</b><span>AOI</span></div><div class="box"><b>-</b><span>Collections</span></div><div class="box"><b>-</b><span>Data quality</span></div><div class="box"><b>-</b><span>Valid events</span></div></div>
+      </div>
+      <div class="card span-6">
+        <h2>AOI search</h2>
+        <p class="muted">Select a known/uploaded AOI, or search by place, airfield code, misspelling, or coordinates such as <code>53.2307, -0.5406, 25 km</code>.</p>
+        <label class="muted">AOI options</label>
+        <select id="aoiSelect" onchange="applySelectedAoi()"><option value="">Loading AOI options...</option></select>
+        <div class="btnrow"><input id="aoiSearch" value="Lincoln, UK" aria-label="AOI search"/><button type="button" onclick="searchAoi()">Search</button></div>
+        <div id="aoiResults" class="small">Search results will appear here.</div>
+      </div>
+      <div class="card span-6">
+        <h2>Current AOI effect</h2>
+        <div id="aoiEffect" class="status">Loading shared AOI...</div>
+        <div class="btnrow">
+          <a class="btn" href="/engineering/map?v=0122&aoi=mission">Open Map</a>
+          <a class="btn secondary" href="/reporting/j2?v=0122&aoi=mission">Open J2</a>
+        </div>
+      </div>
+      <div class="card span-12">
+        <h2>Raw context payload</h2>
+        <pre id="rawCtx" class="small">Loading...</pre>
+      </div>
+    </section>
+  </main>
+  <script>
+    const $=id=>document.getElementById(id);
+    let latestResults=[];
+    let optionResults=[];
+    function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+    async function json(url, opts){const r=await fetch(url,Object.assign({cache:'no-store'},opts||{}));if(!r.ok)throw new Error(await r.text());return r.json();}
+    function renderContext(c){
+      const f=c.aoi_filter||{};
+      $('ctxCards').innerHTML=`<div class="box"><b>${esc(c.aoi||'-')}</b><span>AOI</span></div><div class="box"><b>${esc(c.collections?.count??'-')}</b><span>Collections</span></div><div class="box"><b>${esc(c.data_quality?.level||'-')}</b><span>Data quality</span></div><div class="box"><b>${esc(c.collections?.valid_events??'-')}</b><span>Valid events</span></div>`;
+      $('aoiEffect').textContent = f.filterable ? `Map filter: ${f.label}\nCentre: ${f.lat}, ${f.lon}\nRadius: ${Math.round(f.radius_m)} m\nBounds: ${JSON.stringify(f.bounds)}` : `J2 query only: ${c.aoi || '-'}\nNo map centre/radius is available for this AOI.`;
+      $('rawCtx').textContent=JSON.stringify(c,null,2);
+      $('aoiSearch').value=c.aoi||'';
+    }
+    async function loadContext(){try{renderContext(await json('/api/platform/mission-context'));}catch(e){$('rawCtx').textContent=String(e.message||e);}}
+    function labelForResult(r){
+      const count = r.valid_event_count || r.event_count;
+      const suffix = count ? ` (${count} events)` : '';
+      return `${r.label}${suffix}`;
+    }
+    function populateOptions(items){
+      optionResults=items||[];
+      const sel=$('aoiSelect');
+      if(!optionResults.length){sel.innerHTML='<option value="">No AOI options available</option>';return;}
+      sel.innerHTML='<option value="">Select known or uploaded AOI...</option>'+optionResults.map((r,i)=>`<option value="${i}">${esc(labelForResult(r))}</option>`).join('');
+    }
+    function renderResults(items){
+      latestResults=items||[];
+      if(!latestResults.length){$('aoiResults').innerHTML='<p class="muted">No AOI match. Try coordinates as lat, lon, radius km.</p>';return;}
+      $('aoiResults').innerHTML=latestResults.map((r,i)=>`<div class="aoiResult"><div><b>${esc(r.label)}</b><div class="muted">${esc(r.source||'source')} | ${esc(r.lat)}, ${esc(r.lon)} | radius ${esc(Math.round(r.radius_m||0))} m${r.valid_event_count?` | ${esc(r.valid_event_count)} events`:''}</div></div><button type="button" onclick="applyAoi(${i})">Use AOI</button></div>`).join('');
+    }
+    async function searchAoi(){try{const data=await json('/api/platform/aoi/search?q='+encodeURIComponent($('aoiSearch').value||''));renderResults(data.results||[]);}catch(e){$('aoiResults').textContent=String(e.message||e);}}
+    async function loadAoiOptions(){try{const data=await json('/api/platform/aoi/search?limit=20');populateOptions(data.results||[]);}catch(e){$('aoiSelect').innerHTML='<option value="">AOI options unavailable</option>';}}
+    async function applySelectedAoi(){const value=$('aoiSelect').value;if(value==='')return;const idx=Number(value);if(Number.isNaN(idx)||idx<0)return;latestResults=optionResults;await applyAoi(idx);}
+    async function applyAoi(i){
+      const r=latestResults[i]; if(!r) return;
+      const body={aoi:r.label,lat:r.lat,lon:r.lon,radius_m:r.radius_m};
+      const c=await json('/api/platform/mission-context',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      renderContext(c);
+      $('aoiResults').innerHTML='<p class="muted">Shared AOI saved. Map and J2 now use this AOI by default.</p>';
+    }
+    loadContext().then(()=>Promise.allSettled([loadAoiOptions(), searchAoi()]));
+  </script>
+  <script src="/static/platform_shell.js?v=0127" defer></script>
+</body>
+</html>

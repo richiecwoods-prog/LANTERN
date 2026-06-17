@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -13,6 +13,7 @@
     @media(max-width:1000px){.layout,.grid2,.grid3{grid-template-columns:1fr}}
   </style>
   <link rel="stylesheet" href="/static/lantern_nav.css" />
+  <link rel="stylesheet" href="/static/platform_shell.css?v=0127" />
 </head>
 <body>
 <header>
@@ -32,13 +33,13 @@
     <div class="small">Use this when MOTH GPS time has reset by years or decades.</div>
 
     <h3>Launch timing settings</h3>
-    <div class="grid2"><div><label>Duration minutes</label><input id="durationMinutes" value="30" /></div><div><label>Step minutes</label><input id="stepMinutes" value="10" /></div></div>
+    <div class="grid2"><div><label>Duration minutes</label><input id="durationMinutes" value="30" /></div><div><label>Step minutes</label><input id="stepMinutes" value="30" /></div></div>
     <div class="grid2"><div><label>GNSS window MHz</label><input id="widthMhz" value="40" /></div><div><label>Spike threshold dBm</label><input id="spikeDbm" value="-60" /></div></div>
 
     <h3>Optional connectivity band</h3>
     <div class="grid2"><div><label>Connectivity min Hz</label><input id="connMin" placeholder="optional" /></div><div><label>Connectivity max Hz</label><input id="connMax" placeholder="optional" /></div></div>
     <label>Candidate radius m</label><input id="radiusM" value="1500" />
-    <label>Max rows</label><input id="maxRows" value="500000" />
+    <label>Max rows</label><input id="maxRows" value="60000" />
 
     <h3>Pattern-of-life</h3>
     <label>Analysis level</label><select id="period"><option value="day">Day-on-day</option><option value="week">Week-on-week</option><option value="month">Month-on-month</option></select>
@@ -81,13 +82,13 @@ function renderChecks(checks){if(!checks||!checks.length)return 'No checks retur
 function renderCandidates(cands){if(!cands||!cands.length)return 'No scored candidates returned.';return `<table><tr><th>Rank</th><th>Name</th><th>Score</th><th>Confidence</th></tr>${cands.map(c=>`<tr><td>${esc(c.rank??'')}</td><td>${esc(c.name??'')}</td><td>${esc(c.score_0_100??'')}</td><td>${esc(c.data_confidence??'')}</td></tr>`).join('')}</table>`}
 async function checkTimeSanity(fill=false){try{const q=new URLSearchParams();if(val('collectionIds'))q.set('collection_ids',val('collectionIds')); if(val('validStartUtc'))q.set('sane_start_utc',val('validStartUtc')); if(val('validEndUtc'))q.set('sane_end_utc',val('validEndUtc')); if(val('maxRows'))q.set('max_rows',val('maxRows')); const data=await getJson(`${api}/api/mission/time-sanity?${q.toString()}`); document.getElementById('timeSanity').innerHTML=`<p><b>${esc(data.confidence)}</b>: ${esc(data.plain_summary)}</p><p>Suggested UTC range: ${esc(data.recommended_start_utc)} to ${esc(data.recommended_end_utc)}</p><p>Bad/missing timestamp rows: ${esc((data.bad_or_out_of_range_timestamp_rows||0)+(data.missing_or_unparseable_timestamp_rows||0))}</p>`; if(fill){if(!val('validStartUtc')&&data.recommended_start_utc)document.getElementById('validStartUtc').value=data.recommended_start_utc;if(!val('validEndUtc')&&data.recommended_end_utc)document.getElementById('validEndUtc').value=data.recommended_end_utc}}catch(e){document.getElementById('timeSanity').textContent=`Time sanity check failed: ${e.message}`}}
 async function runPatterns(){try{const q=buildQuery(); const data=await getJson(`${api}/api/mission/pattern-of-life?period=${encodeURIComponent(val('period')||'day')}&${q}`); const top=(data.quietest_periods||[]); const table=`<table><tr><th>Period</th><th>Status</th><th>Score</th><th>Events</th><th>Spikes</th><th>L1/L2/L3/L5</th><th>Max dBm</th></tr>${top.map(r=>`<tr><td>${esc(r.period)}</td><td>${esc(r.status)}</td><td>${esc(r.cleanliness_score_0_100)}</td><td>${esc(r.event_count)}</td><td>${esc(r.spike_count)}</td><td>${esc(r.l1_count)}/${esc(r.l2_count)}/${esc(r.l3_count)}/${esc(r.l5_count)}</td><td>${esc(r.max_dbm)}</td></tr>`).join('')}</table>`; document.getElementById('patterns').innerHTML=`<p><b>${esc(data.analysis_type)}</b>. ${esc(data.definition)}</p><p>Rows used: ${esc(data.rows_used)}; bad GPS-time rows excluded: ${esc(data.bad_or_out_of_range_time_rows_excluded)}</p>${table}`;}catch(e){document.getElementById('patterns').textContent=`Pattern analysis failed: ${e.message}`}}
-async function checkReadiness(){document.getElementById('topCard').innerHTML='<h2>Checking readiness...</h2><p class="muted">Running data quality, candidate and launch-window checks.</p>'; const data=await getJson(`${api}/api/mission/readiness?${buildQuery()}`); renderReadiness(data);}
+async function checkReadiness(){document.getElementById('topCard').innerHTML='<h2>Checking readiness...</h2><p class="muted">Running data quality, candidate and launch-window checks.</p>'; const data=await getJson(`${api}/api/mission/readiness?${buildQuery()}`); renderReadiness(data); document.getElementById('topCard').innerHTML=`<h2>Mission result</h2><p><b>RF Readiness ${esc(data.readiness||'NO DATA')}</b></p><p>${esc(data.summary||'Readiness check complete.')}</p>`;}
 function renderReadiness(data){const r=data.readiness||'NO DATA',cls=statusClass(r);document.getElementById('readinessCard').className=`card status-${cls}`;document.getElementById('readinessCard').innerHTML=`<h2>RF Readiness</h2><div class="big ${cls}">${esc(r)}</div><p>${esc(data.summary||'')}</p>`;const win=data.best_launch_window||{};const wl=win.recommendation_type||'NO DATA',wcls=statusClass(wl);document.getElementById('launchCard').className=`card status-${wcls}`;document.getElementById('launchCard').innerHTML=`<h2>Launch timing</h2><div class="big ${wcls}">${esc(wl)}</div><p>${esc(win.start_utc||'')} to ${esc(win.end_utc||'')} UTC<br>Score: ${esc(win.score_0_100??'n/a')}/100</p>`;const cand=(data.top_candidates||[])[0]||{};document.getElementById('candidateCard').innerHTML=`<h2>Antenna candidate</h2><div class="big">${esc(cand.name||'No scored candidate')}</div><p>Score: ${esc(cand.score_0_100??'n/a')} / Confidence: ${esc(cand.data_confidence??'n/a')}</p>`;document.getElementById('checks').innerHTML=renderChecks(data.checks||[]);document.getElementById('candidates').innerHTML=renderCandidates(data.top_candidates||[])}
 async function runMissionBrief(){document.getElementById('topCard').innerHTML='<h2>Creating mission brief...</h2><p class="muted">This may take a moment on the Pi.</p>'; await checkTimeSanity(false); const data=await getJson(`${api}/api/mission/brief?${buildQuery()}`); renderReadiness(data.readiness||{}); const op=data.operator_brief||{}; document.getElementById('topCard').innerHTML=`<h2>Mission result</h2><p><b>${esc(op.headline||'No headline')}</b></p><p>${esc(op.candidate_line||'')}</p>`; document.getElementById('briefText').innerHTML=`<p><b>${esc(op.headline||'')}</b></p><p>${esc(op.candidate_line||'')}</p><h3>Why</h3><ul>${(op.rationale||[]).map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`; document.getElementById('limitations').innerHTML=(op.limitations||[]).map(x=>`<li>${esc(x)}</li>`).join(''); document.getElementById('trace').textContent=JSON.stringify(data.ai_handoff||{},null,2); await runPatterns();}
 function openJspReport(){const q=buildQuery(); window.open(`${api}/api/mission/report-jsp101.html?period=${encodeURIComponent(val('period')||'day')}&${q}`,'_blank')}
 (async()=>{try{const h=await getJson(`${api}/api/mission/health`);document.getElementById('trace').textContent=`Mission API ready: ${h.mission_version}`; await checkTimeSanity(false);}catch(e){document.getElementById('trace').textContent=`Mission API not available: ${e.message}`;}})();
 </script>
   <script src="/static/lantern_nav.js"></script>
+  <script src="/static/platform_shell.js?v=0127" defer></script>
 </body>
 </html>
-

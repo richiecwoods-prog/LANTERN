@@ -1,0 +1,28 @@
+# LANTERN static page audit v0.12
+
+- api_viewer.html | 6238 bytes | 2026-05-27T19:54:16
+- app_map.html | 6642 bytes | 2026-05-27T19:54:16
+- briefing.html | 4722 bytes | 2026-05-27T19:54:16
+- candidate_report.html | 5294 bytes | 2026-05-27T19:54:16
+- dashboard.html | 5665 bytes | 2026-05-27T19:54:16
+- data_quality.html | 4581 bytes | 2026-05-27T19:54:16
+- engineering_home.html | 6430 bytes | 2026-05-27T19:54:16
+- evidence_log.html | 5311 bytes | 2026-05-27T19:54:16
+- export_pack.html | 5323 bytes | 2026-05-27T19:54:16
+- gnss_serviceability.html | 5275 bytes | 2026-05-27T19:54:16
+- home.html | 1161 bytes | 2026-05-27T19:54:16
+- import_diagnostics.html | 5315 bytes | 2026-05-27T19:54:16
+- index.html | 59540 bytes | 2026-05-27T19:54:16
+- j2_report.html | 31836 bytes | 2026-05-27T19:54:16
+- jsp101_report.html | 9585 bytes | 2026-05-27T19:54:16
+- lantern_flight_safety.html | 40649 bytes | 2026-05-27T19:54:16
+- launch_analysis.html | 22137 bytes | 2026-05-27T19:54:16
+- mission_brief.html | 14708 bytes | 2026-05-27T19:54:16
+- mission_context.html | 6751 bytes | 2026-05-27T19:54:16
+- moth_v080_decision_workflow.html | 11965 bytes | 2026-05-27T19:54:16
+- pattern_of_life.html | 5273 bytes | 2026-05-27T19:54:16
+- platform_home.html | 8319 bytes | 2026-05-27T19:54:16
+- reporting_home.html | 6678 bytes | 2026-05-27T19:54:16
+- rotator.html | 7594 bytes | 2026-05-27T19:54:16
+- system_home.html | 6216 bytes | 2026-05-27T19:54:17
+- uas_rf.html | 19137 bytes | 2026-05-27T19:54:17

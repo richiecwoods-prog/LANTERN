@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LANTERN | J2 Live Article Panel v0.11.1</title>
+  <style>
+    :root{--bg:#050914;--panel:#0c1322;--line:#25344d;--text:#e8eef7;--muted:#9fb0c5;--blue:#24669b;--good:#1f7a3a;--amber:#d4a017;--bad:#b42318}
+    *{box-sizing:border-box}html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif;overflow:hidden}
+    .top{height:54px;display:flex;align-items:center;gap:10px;padding:8px 12px;background:#07101e;border-bottom:1px solid var(--line);position:relative;z-index:2}.brand{font-weight:900;letter-spacing:.04em}.brand small{display:block;font-weight:500;color:var(--muted);font-size:10px;letter-spacing:0}.url{flex:1;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.controls{display:flex;gap:6px;align-items:center}.btn{border:1px solid #316990;background:#1d4f7a;color:#fff;border-radius:8px;padding:7px 9px;font-size:12px;font-weight:800;cursor:pointer;text-decoration:none}.btn.secondary{background:#13233a;border-color:var(--line)}.btn.warn{background:#5a3512;border-color:#8c5e17}.btn:hover{filter:brightness(1.15)}
+    iframe{position:absolute;top:54px;left:0;width:100%;height:calc(100% - 54px);border:0;background:#fff}.progress{position:absolute;left:0;bottom:0;height:4px;background:#2b83c6;width:0;z-index:3}.drawer{position:absolute;right:10px;top:64px;width:min(720px,calc(100% - 20px));max-height:calc(100% - 84px);overflow:auto;background:#0c1322;border:1px solid var(--line);border-radius:13px;padding:12px;z-index:4;box-shadow:0 12px 32px rgba(0,0,0,.45);display:none}.drawer.open{display:block}h2{font-size:16px;margin:0 0 8px}label{display:block;color:#cfe1f6;font-weight:800;font-size:12px;margin:9px 0 4px}textarea,input{width:100%;background:#07101e;color:#eef6ff;border:1px solid var(--line);border-radius:8px;padding:9px;font:inherit;font-size:12px}textarea{min-height:145px}.small{font-size:12px;color:var(--muted)}.pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:4px 8px;font-size:11px}.dot{width:9px;height:9px;border-radius:50%;background:var(--good)}@media(max-width:760px){.brand small,.url{display:none}.top{height:48px}.controls .hide-small{display:none}iframe{top:48px;height:calc(100% - 48px)}}
+  </style>
+  <link rel="stylesheet" href="/static/platform_shell.css?v=0127" />
+</head>
+<body>
+  <div class="top">
+    <div class="brand">LANTERN<small>J2 Live Article Panel v0.11.1</small></div>
+    <div class="url" id="urlLine">Loading…</div>
+    <div class="controls">
+      <span class="pill hide-small"><span class="dot"></span><span id="counter">—</span></span>
+      <button class="btn secondary" id="prevBtn" type="button">Prev</button>
+      <button class="btn" id="pauseBtn" type="button">Pause</button>
+      <button class="btn secondary" id="nextBtn" type="button">Next</button>
+      <button class="btn secondary" id="settingsBtn" type="button">Settings</button>
+      <a class="btn secondary hide-small" href="/app?v=0122">Home</a>
+    </div>
+  </div>
+  <iframe id="frame" title="LANTERN rotating display"></iframe>
+  <div class="progress" id="progress"></div>
+  <div class="drawer" id="drawer">
+    <h2>Rotator settings</h2>
+    <p class="small">One page URL per line. Same-origin LANTERN pages and reports work best. Click Apply to update the display and URL query string.</p>
+    <label for="intervalInput">Interval seconds</label>
+    <input id="intervalInput" value="30" />
+    <label for="pagesInput">Pages</label>
+    <textarea id="pagesInput"></textarea>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn" id="applyBtn" type="button">Apply</button><button class="btn secondary" id="closeBtn" type="button">Close</button><button class="btn warn" id="resetBtn" type="button">Reset defaults</button></div>
+  </div>
+  <script>
+    const DEFAULT_PAGES = [
+      '/app?v=0122',
+      '/reporting/flight-safety?v=0122',
+      '/static/mission_brief.html?v=092',
+      '/reporting/j2?v=0122',
+      '/api/mission/report-jsp101.html?period=day&max_rows=60000&step_minutes=30',
+      '/static/launch_analysis.html?v=075',
+      '/static/data_quality.html?v=080',
+      '/api/platform/deploy-check'
+    ];
+    const $ = id => document.getElementById(id);
+    let pages = [];
+    let index = 0;
+    let paused = false;
+    let intervalSeconds = 30;
+    let started = Date.now();
+    let timer = null;
+    function getQuery(){ return new URLSearchParams(window.location.search); }
+    function parsePages(value){
+      if(!value) return DEFAULT_PAGES.slice();
+      return value.split(/[\n,]+/).map(x => x.trim()).filter(Boolean);
+    }
+    function loadConfig(){
+      const q = getQuery();
+      intervalSeconds = Math.max(5, Number(q.get('interval') || q.get('seconds') || 30));
+      pages = parsePages(q.get('pages'));
+      $('intervalInput').value = String(intervalSeconds);
+      $('pagesInput').value = pages.join('\n');
+    }
+    function saveConfig(){
+      const q = new URLSearchParams();
+      q.set('interval', String(intervalSeconds));
+      q.set('pages', pages.join(','));
+      history.replaceState(null, '', '/static/j2_report.html?v=115?' + q.toString());
+    }
+    function normalizeUrl(url){
+      if(/^https?:\/\//i.test(url)) return url;
+      return url.startsWith('/') ? url : '/' + url;
+    }
+    function show(i){
+      if(!pages.length) pages = DEFAULT_PAGES.slice();
+      index = ((i % pages.length) + pages.length) % pages.length;
+      const url = normalizeUrl(pages[index]);
+      $('frame').src = url;
+      $('urlLine').textContent = url;
+      $('counter').textContent = (index + 1) + ' / ' + pages.length;
+      started = Date.now();
+      $('progress').style.width = '0%';
+    }
+    function next(){ show(index + 1); }
+    function prev(){ show(index - 1); }
+    function tick(){
+      if(paused){ return; }
+      const pct = Math.min(100, ((Date.now() - started) / (intervalSeconds * 1000)) * 100);
+      $('progress').style.width = pct + '%';
+      if(pct >= 100) next();
+    }
+    function start(){
+      if(timer) clearInterval(timer);
+      timer = setInterval(tick, 250);
+    }
+    $('nextBtn').addEventListener('click', next);
+    $('prevBtn').addEventListener('click', prev);
+    $('pauseBtn').addEventListener('click', () => { paused = !paused; $('pauseBtn').textContent = paused ? 'Resume' : 'Pause'; });
+    $('settingsBtn').addEventListener('click', () => $('drawer').classList.toggle('open'));
+    $('closeBtn').addEventListener('click', () => $('drawer').classList.remove('open'));
+    $('resetBtn').addEventListener('click', () => { pages = DEFAULT_PAGES.slice(); intervalSeconds = 30; $('intervalInput').value = '30'; $('pagesInput').value = pages.join('\n'); saveConfig(); show(0); });
+    $('applyBtn').addEventListener('click', () => { intervalSeconds = Math.max(5, Number($('intervalInput').value || 30)); pages = parsePages($('pagesInput').value); saveConfig(); $('drawer').classList.remove('open'); show(0); });
+    document.addEventListener('keydown', ev => { if(ev.key === 'ArrowRight') next(); if(ev.key === 'ArrowLeft') prev(); if(ev.key === ' ') { ev.preventDefault(); $('pauseBtn').click(); } if(ev.key === 'Escape') $('drawer').classList.remove('open'); });
+    loadConfig(); show(0); start();
+  </script>
+  <script src="/static/platform_shell.js?v=0127" defer></script>
+</body>
+</html>

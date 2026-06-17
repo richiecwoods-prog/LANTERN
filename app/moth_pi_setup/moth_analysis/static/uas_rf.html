@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -43,6 +43,7 @@
     @media (max-width: 1100px) { main { grid-template-columns:1fr; } .cards { grid-template-columns:1fr; } .grid2 { grid-template-columns:1fr; } }
   </style>
   <link rel="stylesheet" href="/static/lantern_nav.css" />
+  <link rel="stylesheet" href="/static/platform_shell.css?v=0127" />
 </head>
 <body>
 <header>
@@ -73,7 +74,7 @@
     </div>
 
     <h3>Optional target / control-link band</h3>
-    <div class="muted">Use this only if you have an authorised band you want treated as the â€œconnectivity evidenceâ€ band. Otherwise launch-window scoring uses RF-cleanliness only.</div>
+    <div class="muted">Use this only if you have an authorised band you want treated as the "connectivity evidence" band. Otherwise launch-window scoring uses RF-cleanliness only.</div>
     <div class="row">
       <div><label>Target min Hz</label><input id="targetMinHz" type="number" placeholder="optional" /></div>
       <div><label>Target max Hz</label><input id="targetMaxHz" type="number" placeholder="optional" /></div>
@@ -81,10 +82,10 @@
 
     <h3>Quick GNSS filters</h3>
     <div class="toolbar">
-      <button type="button" onclick="setTargetBand(1555420000,1595420000)">L1 Â±20 MHz</button>
-      <button type="button" onclick="setTargetBand(1207600000,1247600000)">L2 Â±20 MHz</button>
-      <button type="button" onclick="setTargetBand(1156450000,1196450000)">L5 Â±20 MHz</button>
-      <button type="button" onclick="setTargetBand(1361050000,1401050000)">L3 Â±20 MHz</button>
+      <button type="button" onclick="setTargetBand(1555420000,1595420000)">L1 +/-20 MHz</button>
+      <button type="button" onclick="setTargetBand(1207600000,1247600000)">L2 +/-20 MHz</button>
+      <button type="button" onclick="setTargetBand(1156450000,1196450000)">L5 +/-20 MHz</button>
+      <button type="button" onclick="setTargetBand(1361050000,1401050000)">L3 +/-20 MHz</button>
       <button type="button" onclick="setTargetBand('', '')">Clear target</button>
     </div>
 
@@ -103,9 +104,9 @@
     <section>
       <h2>RF-clean launch-window summary</h2>
       <div class="cards" id="summaryCards">
-        <div class="card"><b>â€”</b><span class="muted">Best window</span></div>
-        <div class="card"><b>â€”</b><span class="muted">Score</span></div>
-        <div class="card"><b>â€”</b><span class="muted">GNSS risk</span></div>
+        <div class="card"><b>--</b><span class="muted">Best window</span></div>
+        <div class="card"><b>--</b><span class="muted">Score</span></div>
+        <div class="card"><b>--</b><span class="muted">GNSS risk</span></div>
       </div>
       <div id="launchText" class="status" style="margin-top:10px">Run launch-window ranking.</div>
     </section>
@@ -256,7 +257,7 @@ function drawPOL(data) {
   hours.forEach((hr,i)=>{ const bh=(hr.event_count/maxCount)*(h-pad-20); const sc=hr.cleanliness_score_0_100; ctx.fillStyle=sc>=75?'#1a9850':sc>=50?'#fdae61':'#d73027'; ctx.fillRect(pad+i*barW, h-pad-bh, Math.max(1,barW-2), bh); });
   ctx.fillStyle='#dce5ee'; ctx.font='12px system-ui'; ctx.fillText('Hourly RF pattern of life (UTC)', pad, 18);
   const clean = [...hours].sort((a,b)=>b.cleanliness_score_0_100-a.cleanliness_score_0_100).slice(0,5);
-  document.getElementById('polText').textContent = `${data.interpretation}\nCleanest hours UTC:\n` + clean.map(h=>`${String(h.hour_utc).padStart(2,'0')}:00 â€” score ${h.cleanliness_score_0_100}, events ${h.event_count}, max ${h.max_dbm ?? 'n/a'} dBm`).join('\n');
+  document.getElementById('polText').textContent = `${data.interpretation}\nCleanest hours UTC:\n` + clean.map(h=>`${String(h.hour_utc).padStart(2,'0')}:00 -- score ${h.cleanliness_score_0_100}, events ${h.event_count}, max ${h.max_dbm ?? 'n/a'} dBm`).join('\n');
 }
 
 async function loadGnssTimeline() { status('Loading L1/L2/L5 timeline...'); const data = await getJson(`/api/gnss-timeline?${query({width_mhz:val('gnssWidthMhz')||20})}`); drawGnss(data); status('GNSS timeline loaded.'); }
@@ -270,9 +271,9 @@ async function loadLaunchWindows() {
   document.getElementById('summaryCards').innerHTML = best ? `
     <div class="card"><b>${esc(best.bucket_start_utc)}</b><span class="muted">Best window UTC</span></div>
     <div class="card"><b class="${best.clean_launch_score_0_100>=75?'good':best.clean_launch_score_0_100>=50?'check':'bad'}">${best.clean_launch_score_0_100}/100</b><span class="muted">RF-clean score</span></div>
-    <div class="card"><b>${best.gnss_event_count} events</b><span class="muted">GNSS-band risk events</span></div>` : `<div class="card"><b>â€”</b><span>No windows</span></div>`;
+    <div class="card"><b>${best.gnss_event_count} events</b><span class="muted">GNSS-band risk events</span></div>` : `<div class="card"><b>--</b><span>No windows</span></div>`;
   document.getElementById('launchText').textContent = data.definition + '\n\nLimitations:\n' + (data.limitations||[]).map(x=>'- '+x).join('\n');
-  document.getElementById('windowsTable').innerHTML = top.length ? `<table><tr><th>Window UTC</th><th>Score</th><th>Recommendation</th><th>GNSS events</th><th>Max GNSS dBm</th><th>Reasons</th></tr>` + top.map(w=>`<tr><td>${esc(w.bucket_start_utc)} â†’ ${esc(w.bucket_end_utc)}</td><td>${w.clean_launch_score_0_100}</td><td>${esc(w.recommendation)}</td><td>${w.gnss_event_count}</td><td>${w.gnss_max_dbm ?? ''}</td><td>${esc((w.reasons||[]).join('; '))}</td></tr>`).join('') + `</table>` : 'No launch windows returned.';
+  document.getElementById('windowsTable').innerHTML = top.length ? `<table><tr><th>Window UTC</th><th>Score</th><th>Recommendation</th><th>GNSS events</th><th>Max GNSS dBm</th><th>Reasons</th></tr>` + top.map(w=>`<tr><td>${esc(w.bucket_start_utc)} -> ${esc(w.bucket_end_utc)}</td><td>${w.clean_launch_score_0_100}</td><td>${esc(w.recommendation)}</td><td>${w.gnss_event_count}</td><td>${w.gnss_max_dbm ?? ''}</td><td>${esc((w.reasons||[]).join('; '))}</td></tr>`).join('') + `</table>` : 'No launch windows returned.';
   status('Launch-window ranking loaded.');
 }
 async function refreshAll() { await Promise.all([loadGnssTimeline(), loadSpectrum(), loadLaunchWindows(), loadPatternOfLife()]); }
@@ -281,6 +282,6 @@ document.addEventListener('click', e=>{ const b=e.target.closest && e.target.clo
 (async function init(){ try { await loadHealth(); await loadCollections(); status('Ready. Select scans or leave blank for all scans, then run RF analysis.'); } catch(e) { status('Startup failed: '+e.message); } })();
 </script>
   <script src="/static/lantern_nav.js"></script>
+  <script src="/static/platform_shell.js?v=0127" defer></script>
 </body>
 </html>
-

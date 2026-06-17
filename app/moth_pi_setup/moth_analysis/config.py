@@ -11,6 +11,6 @@ UPLOAD_DIR = Path(os.getenv("MOTH_UPLOAD_DIR", DATA_DIR / "uploads"))
 DEFAULT_H3_RESOLUTIONS = (8, 9, 10)
 PARSER_VERSION = "0.1.0"
 
-# Aden Adde / HCMM approximate map centre. Used only for initial UI viewport.
-DEFAULT_MAP_CENTER_LON = 45.3040
-DEFAULT_MAP_CENTER_LAT = 2.0140
+# Lincoln, UK approximate map centre. Used only for initial UI viewport.
+DEFAULT_MAP_CENTER_LON = -0.5406
+DEFAULT_MAP_CENTER_LAT = 53.2307

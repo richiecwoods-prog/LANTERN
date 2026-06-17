@@ -1,0 +1,35 @@
+{
+  "version": "0.12.0",
+  "primary": [
+    "Home",
+    "Mission Context",
+    "Reporting",
+    "Engineering",
+    "System"
+  ],
+  "reporting": [
+    "Flight Safety Brief",
+    "Mission Operations Brief",
+    "J2 Live Report",
+    "GNSS Serviceability",
+    "Candidate Site Report",
+    "Source / Evidence Log",
+    "Export Pack"
+  ],
+  "engineering": [
+    "Data Quality Detail",
+    "RF Analyst",
+    "Spectrum / Spikes",
+    "Map / H3 Layers",
+    "Candidate Engineering",
+    "Pattern of Life",
+    "Import Diagnostics",
+    "API Payload Viewer"
+  ],
+  "system": [
+    "System Status",
+    "Deploy Check",
+    "Logs",
+    "App Map"
+  ]
+}

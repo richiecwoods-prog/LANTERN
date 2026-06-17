@@ -35,6 +35,7 @@ def load_valid_events(
     start_utc: str | None = None,
     end_utc: str | None = None,
     min_dbm: float | None = None,
+    max_rows: int | None = None,
 ) -> list[dict[str, Any]]:
     where = ["valid = 1", "lat IS NOT NULL", "lon IS NOT NULL", "strength_dbm IS NOT NULL"]
     params: list[Any] = []
@@ -57,7 +58,10 @@ def load_valid_events(
     if end_utc:
         where.append("timestamp_utc <= ?")
         params.append(end_utc)
-    sql = "SELECT * FROM moth_events WHERE " + " AND ".join(where)
+    sql = "SELECT * FROM moth_events WHERE " + " AND ".join(where) + " ORDER BY timestamp_utc DESC"
+    if max_rows is not None:
+        sql += " LIMIT ?"
+        params.append(int(max_rows))
     conn = connect(db_path) if db_path else connect()
     rows = rows_to_dicts(conn.execute(sql, params).fetchall())
     conn.close()
@@ -74,13 +78,17 @@ def score_candidate_sites(
     start_utc: str | None = None,
     end_utc: str | None = None,
     min_dbm: float | None = None,
+    max_rows: int | None = None,
 ) -> list[dict[str, Any]]:
     conn = connect(db_path) if db_path else connect()
     candidates = rows_to_dicts(conn.execute("SELECT * FROM candidate_sites ORDER BY name").fetchall())
     conn.close()
 
-    target_events = load_valid_events(db_path, target_min_hz, target_max_hz, collection_ids, start_utc, end_utc, min_dbm)
-    all_events = load_valid_events(db_path, None, None, collection_ids, start_utc, end_utc, min_dbm)
+    target_events = load_valid_events(db_path, target_min_hz, target_max_hz, collection_ids, start_utc, end_utc, min_dbm, max_rows)
+    if target_min_hz is None and target_max_hz is None:
+        all_events = target_events
+    else:
+        all_events = load_valid_events(db_path, None, None, collection_ids, start_utc, end_utc, min_dbm, max_rows)
 
     scored: list[dict[str, Any]] = []
     for site in candidates:

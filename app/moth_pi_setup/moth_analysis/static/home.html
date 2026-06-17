@@ -1,18 +1,24 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>LANTERN Home Redirect</title>
-  <meta http-equiv="refresh" content="0; url=/static/dashboard.html" />
-  <script>window.location.replace('/static/dashboard.html');</script>
+  <meta http-equiv="refresh" content="0; url=/app?v=0122" />
+  <script>window.location.replace('/app?v=0122');</script>
+  <link rel="stylesheet" href="/static/platform_shell.css?v=0127" />
 </head>
 <body>
-  <p>Redirecting to <a href="/static/dashboard.html">LANTERN Home</a>...</p>
+  <p>Redirecting to <a href="/app?v=0122">LANTERN Home</a>...</p>
 
-<!-- EEI LANTERN J2 Live Report link -->
-<a href="/j2?v=101" style="position:fixed;right:18px;top:18px;z-index:9999;background:#0b4f7a;color:#fff;padding:10px 14px;border-radius:8px;text-decoration:none;font-family:Arial,sans-serif;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,.25)">
+<!-- LANTERN J2 Live Report link -->
+<a href="/reporting/j2?v=0122" style="position:fixed;right:18px;top:18px;z-index:9999;background:#0b4f7a;color:#fff;padding:10px 14px;border-radius:8px;text-decoration:none;font-family:Arial,sans-serif;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,.25)">
   J2 Live Report
 </a>
+
+<div style="position:fixed;right:18px;bottom:18px;z-index:9999;font-family:Arial,sans-serif">
+  <a href="/lantern" style="display:inline-block;background:#0b4f7a;color:white;text-decoration:none;padding:10px 12px;border-radius:8px;box-shadow:0 3px 12px rgba(0,0,0,.25);font-weight:700">LANTERN Flight Safety Brief</a>
+</div>
+  <script src="/static/platform_shell.js?v=0127" defer></script>
 </body>
 </html>
 

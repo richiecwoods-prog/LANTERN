@@ -10,6 +10,7 @@ __pycache__/
 # Environment/secrets
 .env
 .env.*
+!.env.example
 *.key
 *.pem
 
@@ -17,6 +18,7 @@ __pycache__/
 *.log
 .cache/
 .pytest_cache/
+.runtime_tmp/
 
 # Windows/macOS
 Thumbs.db
@@ -50,6 +52,14 @@ dist/
 .vite/
 *.tsbuildinfo
 
+# Build, release, and packaged output
+build/
+releases/
+artifacts/
+*.zip
+*.bundle
+lantern_v*_build/
+
 # LANTERN runtime data
 app/moth_pi_setup/data/*
 !app/moth_pi_setup/data/.gitkeep
@@ -65,3 +75,8 @@ app/moth_pi_setup/moth_analysis/*.bak*
 
 # Local source backup files
 app/moth_pi_setup/moth_analysis/*.bak*
+
+# Local patch/repair backups
+*.bak*
+*.corrupt_*
+.venv_broken_*/

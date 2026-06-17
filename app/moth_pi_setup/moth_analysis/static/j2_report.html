@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="eei-no-platform-shell" content="true" />
-  <title>EEI LANTERN J2 Live Report v0.11.5</title>
+  <title>LANTERN J2 Live Report v0.11.5</title>
   <style>
     :root{
       --bg:#07111d; --panel:#102235; --panel2:#0c1b2b; --panel3:#071827; --line:#2b5a84; --line2:#1e3e5d;
@@ -30,14 +30,15 @@
     @media(max-width:620px){.cards{grid-template-columns:1fr}.toolbar{display:block}.toolbar .btn,.toolbar label{margin:5px 3px}.input{width:100%;min-width:0}.title{font-size:23px}}
     @media print{.appbar,.toolbar,.tabs,.feed,.btn,.topnav{display:none!important}body{background:#fff;color:#111}.wrap{max-width:none;padding:0}.card,.panel,.summary,.actorCard,.article{background:#fff;color:#111;border-color:#999}.card .label,th,.small,.caption,.sub,.last,.muted{color:#444}td{color:#111}.tabPage.hidden{display:block!important}}
   </style>
+  <link rel="stylesheet" href="/static/platform_shell.css?v=0127" />
 </head>
 <body data-no-platform-shell="true">
   <header class="appbar">
-    <div class="brandBlock"><div class="brand">EEI LANTERN</div><div class="sub">Launch Analysis and Network Telemetry Evaluation for RF Navigation | J2 Live Report v1.0.5</div></div>
+    <div class="brandBlock"><div class="brand">LANTERN</div><div class="sub">Launch Analysis and Network Telemetry Evaluation for RF Navigation | J2 Live Report v1.0.5</div></div>
     <nav class="topnav" aria-label="LANTERN navigation">
-      <a href="/app?v=0115" class="primary">Home</a>
+      <a href="/app?v=0122" class="primary">Home</a>
       <a href="/lantern?v=0103">Flight Safety</a>
-      <a href="/static/mission_brief.html?v=091">Mission Brief</a>
+      <a href="/static/mission_brief.html?v=092">Mission Brief</a>
       <a href="/static/launch_analysis.html?v=075">Analyst</a>
       <a href="/api/platform/deploy-check">System</a>
       <span class="apiStatus"><span id="apiDot" class="dot check"></span><span id="apiText">API checking</span></span>
@@ -47,7 +48,7 @@
   <main class="wrap">
     <section class="hero">
       <div>
-        <h1 class="title">EEI LANTERN J2 Live Report</h1>
+        <h1 class="title">LANTERN J2 Live Report</h1>
         <div class="caption">GNSS / RF | Aviation | Threat actor awareness | State/security context | Source-traceable decision support</div>
       </div>
       <div id="lastUpdated" class="last">Not loaded</div>
@@ -57,8 +58,8 @@
       <button id="refreshBtn" class="btn primary">Refresh live OSINT</button>
       <button id="cacheBtn" class="btn secondary">Load cached</button>
       <button class="btn secondary" onclick="window.open('/api/j2/report.html','_blank')">Print / save PDF</button>
-      <button class="btn secondary" onclick="location.href='/app?v=0115'">LANTERN Home</button>
-      <label>AOI <input id="aoi" class="input" value="Aden Adde / Mogadishu" /></label>
+      <button class="btn secondary" onclick="location.href='/app?v=0122'">LANTERN Home</button>
+      <label>AOI <input id="aoi" class="input" value="Lincoln, UK" /></label>
       <label>Collections <input id="collections" class="input" placeholder="e.g. 1,2,3" /></label>
       <label class="check"><input type="checkbox" id="autoRefresh" /> Auto refresh 5 min</label>
     </section>
@@ -96,7 +97,7 @@
     <section class="tabPage hidden" id="actorsTab">
       <div class="grid">
         <div class="panel"><h3>Threat actor handling</h3><div id="actorBrief"></div></div>
-        <div class="panel safety"><h3>Attribution boundary</h3><p>Do not attribute interference to Al-Shabaab, ISIS-Somalia, a state actor, or any other actor unless a cited source explicitly supports that attribution. Keep MOTH RF measurements separate from public-source attribution language.</p></div>
+        <div class="panel safety"><h3>Attribution boundary</h3><p>Do not attribute interference to any actor or cause unless a cited source and the technical evidence explicitly support that attribution. Keep MOTH RF measurements separate from public-source attribution language.</p></div>
       </div>
       <div class="panel accent"><h2>Structured J2 threat actor register</h2><div id="actorCards" class="actorGrid"></div></div>
       <div class="panel"><h2>Actor-linked recent reporting and source hits</h2><div id="actorArticles" class="articleList"></div></div>
@@ -117,14 +118,14 @@
 
     <section class="tabPage hidden" id="exportTab">
       <div class="grid">
-        <div class="panel"><h3>Export</h3><p><a class="btn primary" href="/api/j2/report.html" target="_blank">Open printable J2 report</a> <a class="btn secondary" href="/api/j2/export.csv">Download source CSV</a> <a class="btn secondary" href="/api/mission/report-jsp101.html" target="_blank">Open JSP 101 RF mission report</a></p><p class="small">Use the source CSV to preserve the OSINT source register with the briefing pack.</p></div>
+        <div class="panel"><h3>Export</h3><p><a class="btn primary" href="/api/j2/report.html" target="_blank">Open printable J2 report</a> <a class="btn secondary" href="/api/j2/export.csv">Download source CSV</a> <a class="btn secondary" href="/api/mission/report-jsp101.html?period=day&amp;max_rows=60000&amp;step_minutes=30" target="_blank">Open JSP 101 RF mission report</a></p><p class="small">Use the source CSV to preserve the OSINT source register with the briefing pack.</p></div>
         <div class="panel"><h3>API endpoints</h3><ul class="clean"><li><code>/api/j2/news?live=true&amp;force=true</code></li><li><code>/api/j2/threat-actors?live=true&amp;force=true</code></li><li><code>/api/j2/report?live=true&amp;force=true</code></li><li><code>/api/j2/export.csv</code></li></ul></div>
       </div>
     </section>
   </main>
 
   <aside class="feed">
-    <div class="feedHead"><span class="feedTitle">LIVE OSINT ARTICLES</span><span class="feedBtns"><button id="miniRefresh">Refresh</button><button id="pauseBtn">Pause</button><button id="nextBtn">›</button></span></div>
+    <div class="feedHead"><span class="feedTitle">LIVE OSINT ARTICLES</span><span class="feedBtns"><button id="miniRefresh">Refresh</button><button id="pauseBtn">Pause</button><button id="nextBtn">Next</button></span></div>
     <div class="feedBody" id="feedBody">Loading article feed...</div>
     <div class="feedFoot" id="feedFoot">Feed loading</div>
   </aside>
@@ -142,22 +143,22 @@ let autoTimer = null;
 
 const fallbackActors = [
   {
-    actor:'Al-Shabaab', type:'Primary non-state threat actor watch line', confidence:'source-register / live-source dependent',
-    j2_relevance:'Primary Mogadishu and south-central Somalia security threat line. Track attacks, airport-area security reporting, IED/indirect-fire/small-arms incidents, warnings, claims and local operating restrictions.',
-    current_assessment:'Treat as the priority actor watch line for Mogadishu/Aden Adde area awareness when source reporting is current. Do not infer RF/GNSS interference attribution from MOTH detections alone.',
-    aviation_rf_relevance:'Relevant to airport security posture, airspace risk, movement restrictions, route planning and conservative task approvals.'
+    actor:'Local civil aviation / airspace operating context', type:'Official aviation and airspace context', confidence:'official-source preferred',
+    j2_relevance:'Primary official-source context for airspace, NOTAM, AIP, tasking constraints and safe operating decisions in the selected AOI.',
+    current_assessment:'Check official aviation and local coordination sources before any GPS-dependent or RF-sensitive activity.',
+    aviation_rf_relevance:'Direct relevance to aviation safety, airspace coordination and GNSS/RF operating assumptions.'
   },
   {
-    actor:'ISIS-Somalia / Islamic State Somalia', type:'Secondary non-state threat actor watch line', confidence:'source-register / live-source dependent',
-    j2_relevance:'Track separately from Al-Shabaab. Usually handled as a Somalia security actor line; do not merge reporting unless a source explicitly links activity to the AOI.',
-    current_assessment:'Monitor for Somalia security context and any source-linked expansion or operational relevance. Do not assume local Mogadishu relevance without reporting support.',
-    aviation_rf_relevance:'Relevant as wider Somalia security context. Only elevate AOI relevance if current sources link the activity to Mogadishu, Aden Adde, aviation, airport access, or task route security.'
+    actor:'Spectrum interference / communications disruption source', type:'Unattributed technical/risk bucket', confidence:'technical observation until sourced',
+    j2_relevance:'Strong or recurrent RF/GNSS activity belongs here unless a cited source explicitly attributes cause or actor.',
+    current_assessment:'MOTH can show frequency, strength, time and place of observed RF activity; it cannot by itself identify a cause or actor.',
+    aviation_rf_relevance:'Relevant to equipment serviceability and safety checks. Requires receiver health, independent GNSS checks and local validation before operational conclusion.'
   },
   {
-    actor:'Somalia state / SCAA / airport / security-force context', type:'State and authorised security operating context', confidence:'official-source preferred',
-    j2_relevance:'Covers airport permissions, SCAA coordination, checkpoints, cordons, AUSSOM/security partner activity, NOTAM/eAIP constraints, and task-area restrictions.',
-    current_assessment:'Not a hostile actor bucket. Use to frame permissions, operating constraints, safety approvals and local coordination requirements.',
-    aviation_rf_relevance:'Directly relevant to airport-area permissions, communications, local movement, equipment deployment, and task go/no-go constraints.'
+    actor:'Local security / public-safety context', type:'Public safety and operating environment context', confidence:'source-linked only',
+    j2_relevance:'Covers local disruption, cordons, events, policing or access constraints that could affect the selected AOI.',
+    current_assessment:'Use official and reputable local reporting as awareness. Do not infer RF attribution from public-safety context.',
+    aviation_rf_relevance:'Indirect relevance where local disruption affects the task area, route, airfield access or deployment conditions.'
   },
   {
     actor:'External state / regional actors', type:'Regional context watch line', confidence:'source-linked only',
@@ -174,7 +175,7 @@ const fallbackActors = [
 ];
 
 const fallbackBrief = [
-  'Maintain separate watch lines for Al-Shabaab, ISIS-Somalia, Somalia state/security context, external regional context, and unknown RF/GNSS sources.',
+  'Maintain separate watch lines for aviation/airspace context, local security context, external reporting, and unknown RF/GNSS sources.',
   'Actor reporting is for J2 awareness and traceability. Local RF detections are measurement evidence, not attribution evidence.',
   'Escalate an actor watch line only when a cited source links the actor, location, timing and operational relevance to the AOI.',
   'Use official aviation/security sources first where available, then reputable news and source-register links as supporting context.'
@@ -185,7 +186,7 @@ function safeArray(x){return Array.isArray(x) ? x : [];}
 function words(s){return String(s||'').toLowerCase();}
 function qs(live=true, force=false){
   const p = new URLSearchParams();
-  p.set('aoi', $('aoi').value || 'Aden Adde / Mogadishu');
+  p.set('aoi', $('aoi').value || 'Lincoln, UK');
   const c = ($('collections').value || '').trim();
   if(c) p.set('collection_ids', c);
   p.set('live', live ? 'true' : 'false');
@@ -370,7 +371,19 @@ function setTab(id){
   document.querySelectorAll('.tabPage').forEach(p=>p.classList.toggle('hidden', p.id!==id));
 }
 function nextFeed(){ const items=feedItems(); if(!items.length)return; articleIndex=(articleIndex+1)%items.length; renderFeed(); }
-function setup(){
+async function loadSharedAoiForJ2(){
+  const params = new URLSearchParams(location.search || '');
+  const requested = (params.get('aoi') || '').trim();
+  if (requested && !['mission','current','shared'].includes(requested.toLowerCase())) {
+    $('aoi').value = requested;
+    return;
+  }
+  try {
+    const ctx = await getJson('/api/platform/mission-context');
+    $('aoi').value = ctx.aoi_query || ctx.aoi || $('aoi').value || 'Lincoln, UK';
+  } catch (_) {}
+}
+async function setup(){
   document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>setTab(b.dataset.tab)));
   $('refreshBtn').addEventListener('click',()=>refreshReport(true,true));
   $('cacheBtn').addEventListener('click',loadCache);
@@ -380,9 +393,11 @@ function setup(){
   $('autoRefresh').addEventListener('change',()=>{if(autoTimer) clearInterval(autoTimer); autoTimer=null; if($('autoRefresh').checked){autoTimer=setInterval(()=>refreshReport(true,true), 5*60*1000);}});
   setInterval(()=>{if(!paused) nextFeed();}, 12000);
   getJson('/api/j2/health').then(()=>setApi(true,'API online')).catch(()=>setApi(false,'API offline'));
+  await loadSharedAoiForJ2();
   refreshReport(true,false);
 }
 setup();
 </script>
+  <script src="/static/platform_shell.js?v=0127" defer></script>
 </body>
 </html>

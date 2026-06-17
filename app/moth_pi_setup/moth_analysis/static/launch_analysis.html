@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -42,6 +42,7 @@
   .axisLabel { color:#d8dde4; font-weight:700; }
 </style>
   <link rel="stylesheet" href="/static/lantern_nav.css" />
+  <link rel="stylesheet" href="/static/platform_shell.css?v=0127" />
 </head>
 <body>
 <header>
@@ -89,7 +90,7 @@
   <section>
     <div class="panel recommend">
       <h2>Recommended launch timing</h2>
-      <div id="recommendation" class="status bigreadout">No launch timing loaded. Click â€œGet recommended / best viable launch timingâ€.</div>
+      <div id="recommendation" class="status bigreadout">No launch timing loaded. Click "Get recommended / best viable launch timing".</div>
       <div class="timekey"><b>How to read this:</b> the top card is either RECOMMENDED or, if no clean window qualifies, the best viable / least-busy timing from the MOTH data. It means fewer detected GNSS-window RF events and fewer strong spikes. It does not prove the airspace or RF environment is safe.</div>
     </div>
 
@@ -153,8 +154,8 @@ function scoreClass(score) { return score >= 75 ? 'good' : score >= 50 ? 'check'
 function readoutForWindow(w) {
   if (!w) return 'No launch timing can be assessed for the current filters. Broaden the time/frequency filters or load more MOTH data.';
   const label = w.recommendation_type || (Number(w.score_0_100||0) >= 75 ? 'RECOMMENDED' : Number(w.score_0_100||0) >= 60 ? 'BEST VIABLE' : Number(w.score_0_100||0) >= 40 ? 'LEAST-BUSY OBSERVED' : 'AVOID IF POSSIBLE');
-  return `${label}: ${utcHHMM(w.start_utc)}â€“${utcHHMM(w.end_utc)} UTC (${localPlus3(w.start_utc)}â€“${localPlus3(w.end_utc)} approx local)
-Score: ${w.score_0_100}/100 Â· ${w.interpretation}
+  return `${label}: ${utcHHMM(w.start_utc)}-${utcHHMM(w.end_utc)} UTC (${localPlus3(w.start_utc)}-${localPlus3(w.end_utc)} approx local)
+Score: ${w.score_0_100}/100 - ${w.interpretation}
 Why: ${(w.reasons||[]).join('; ')}`;
 }
 
@@ -179,7 +180,7 @@ function drawTimeTicks(ctx, series, w, h, pad) {
 function drawLineChart(canvasId, series, keys, colours) {
   const c = document.getElementById(canvasId); const [ctx,w,h] = resizeCanvas(c); const pad=58;
   ctx.clearRect(0,0,w,h); ctx.fillStyle='#08090b'; ctx.fillRect(0,0,w,h);
-  drawAxes(ctx,w,h,pad,'event count','UTC time â†’');
+  drawAxes(ctx,w,h,pad,'event count','UTC time ->');
   const maxY = Math.max(1, ...series.flatMap(p => keys.map(k => Number(p[k]||0))));
   ctx.fillStyle='#888'; ctx.font='11px system-ui'; ctx.fillText('0', pad-20, h-pad+4); ctx.fillText(String(maxY), pad-34, 24);
   keys.forEach((key, ki) => {
@@ -194,7 +195,7 @@ function drawLineChart(canvasId, series, keys, colours) {
 }
 function drawSpectrum(data) {
   const cells = data.spectrum_cells || []; const c=document.getElementById('spectrumCanvas'); const [ctx,w,h]=resizeCanvas(c); const pad=58;
-  ctx.clearRect(0,0,w,h); ctx.fillStyle='#08090b'; ctx.fillRect(0,0,w,h); drawAxes(ctx,w,h,pad,'MHz bins','UTC time â†’');
+  ctx.clearRect(0,0,w,h); ctx.fillStyle='#08090b'; ctx.fillRect(0,0,w,h); drawAxes(ctx,w,h,pad,'MHz bins','UTC time ->');
   if (!cells.length) { ctx.fillStyle='#ddd'; ctx.fillText('No spectrum cells for current filters.',20,36); return; }
   const times=[...new Set(cells.map(x=>x.bucket_start_utc))].sort(); const freqs=[...new Set(cells.map(x=>x.freq_bin_mhz))].sort((a,b)=>a-b);
   const timeIndex=new Map(times.map((t,i)=>[t,i])); const freqIndex=new Map(freqs.map((f,i)=>[f,i])); const cw=Math.max(1,(w-pad-14)/times.length); const ch=Math.max(1,(h-pad-30)/freqs.length);
@@ -223,7 +224,7 @@ function updateAnalystSummary() {
     for (const r of (brief.rationale || []).slice(0,4)) lines.push(`- ${r}`);
   } else if (best) {
     const label = best.recommendation_type || 'BEST VIABLE';
-    lines.push(`${label}: ${utcHHMM(best.start_utc)}â€“${utcHHMM(best.end_utc)} UTC (${localPlus3(best.start_utc)}â€“${localPlus3(best.end_utc)} local approx).`);
+    lines.push(`${label}: ${utcHHMM(best.start_utc)}-${utcHHMM(best.end_utc)} UTC (${localPlus3(best.start_utc)}-${localPlus3(best.end_utc)} local approx).`);
     lines.push(`Score ${best.score_0_100}/100: ${best.interpretation}.`);
     lines.push(`GNSS events ${best.gnss_event_count}, strong GNSS spikes ${best.gnss_spike_count}.`);
   } else {
@@ -244,7 +245,7 @@ async function loadGnssTimeline() {
 Bucket size: ${document.getElementById('binMinutes').value} minutes
 GNSS window width: ${data.width_mhz} MHz
 Time axis: UTC labels; second line is approximate UTC+3 local time.
-Data span: ${data.first_timestamp_utc || ''} â†’ ${data.last_timestamp_utc || ''}
+Data span: ${data.first_timestamp_utc || ''} -> ${data.last_timestamp_utc || ''}
 Interpretation: lower event counts are cleaner GNSS-window conditions, subject to MOTH event-log limitations.`;
     setStatus('L1/L2/L5 timeline loaded.'); updateAnalystSummary();
   } catch (err) {
@@ -254,7 +255,7 @@ Interpretation: lower event counts are cleaner GNSS-window conditions, subject t
 }
 async function loadSpectrum() {
   try {
-    setStatus('Loading spectrum / abnormal-spike analysis. This is the heaviest view; use 30â€“60 minute bins and 10 MHz frequency bins for speed.');
+    setStatus('Loading spectrum / abnormal-spike analysis. This is the heaviest view; use 30-60 minute bins and 10 MHz frequency bins for speed.');
     const data = await getJson(`${api}/api/advanced/spectrum-analysis?${q({time_bin_minutes:document.getElementById('binMinutes').value, freq_bin_mhz:document.getElementById('spectrumBinMhz').value})}`);
     lastSpectrum = data; drawSpectrum(data);
     document.getElementById('anomalies').innerHTML = table((data.anomalies||[]).slice(0,8), [['UTC time','bucket_start_utc'],['MHz','freq_bin_mhz'],['Score','anomaly_score_0_100'],['Max dBm','max_dbm']]);
@@ -273,7 +274,7 @@ function renderWindowCards(windows) {
     const div = document.createElement('div'); div.className = 'launch-card' + (i===0?' recommended':'');
     const cls = scoreClass(Number(w.score_0_100||0));
     const label = i===0 ? (w.recommendation_type || 'BEST VIABLE') : 'Option '+(i+1);
-    div.innerHTML = `<h3>${esc(label)}</h3><div class="${cls} bigreadout">${w.score_0_100}/100</div><div>${utcHHMM(w.start_utc)}â€“${utcHHMM(w.end_utc)} UTC</div><div class="muted">${localPlus3(w.start_utc)}â€“${localPlus3(w.end_utc)} approx local</div><div>${esc(w.interpretation)}</div><div class="muted">${esc((w.reasons||[]).join('; '))}</div>`;
+    div.innerHTML = `<h3>${esc(label)}</h3><div class="${cls} bigreadout">${w.score_0_100}/100</div><div>${utcHHMM(w.start_utc)}-${utcHHMM(w.end_utc)} UTC</div><div class="muted">${localPlus3(w.start_utc)}-${localPlus3(w.end_utc)} approx local</div><div>${esc(w.interpretation)}</div><div class="muted">${esc((w.reasons||[]).join('; '))}</div>`;
     wrap.appendChild(div);
   });
 }
@@ -289,7 +290,7 @@ async function loadLaunchWindows() {
     const best = data.recommended_window || data.best_viable_window || top[0];
     document.getElementById('recommendation').textContent = readoutForWindow(best);
     renderWindowCards(top);
-    const bestLine = best ? `<div class="status"><b>Displayed recommendation:</b> ${esc(best.recommendation_type || 'BEST VIABLE')} Â· ${esc(best.start_utc)} to ${esc(best.end_utc)} Â· score ${esc(best.score_0_100)}/100<br><b>Where to look:</b> this card is the recommended timing. If no RECOMMENDED period exists, it is the BEST VIABLE or LEAST-BUSY observed timing.</div>` : '';
+    const bestLine = best ? `<div class="status"><b>Displayed recommendation:</b> ${esc(best.recommendation_type || 'BEST VIABLE')} - ${esc(best.start_utc)} to ${esc(best.end_utc)} - score ${esc(best.score_0_100)}/100<br><b>Where to look:</b> this card is the recommended timing. If no RECOMMENDED period exists, it is the BEST VIABLE or LEAST-BUSY observed timing.</div>` : '';
     document.getElementById('launchWindows').innerHTML = bestLine + `<div class="muted"><b>Definition:</b> ${esc(data.definition || '')}<br><b>Limitations:</b> ${(data.limitations||[]).map(esc).join(' ')}</div>` + table(top, [['Start UTC','start_utc'],['End UTC','end_utc'],['Type','recommendation_type'],['Score','score_0_100'],['Readout','interpretation'],['GNSS events','gnss_event_count'],['Spikes','gnss_spike_count'],['Conn events','connectivity_event_count']]);
     setStatus('Launch windows ranked. The top recommendation panel is now populated.'); updateAnalystSummary();
   } catch (err) {
@@ -305,6 +306,6 @@ async function runAll() {
 document.addEventListener('click', e => { const b=e.target.closest&&e.target.closest('button'); if(b) b.blur(); }, true);
 </script>
   <script src="/static/lantern_nav.js"></script>
+  <script src="/static/platform_shell.js?v=0127" defer></script>
 </body>
 </html>
-
