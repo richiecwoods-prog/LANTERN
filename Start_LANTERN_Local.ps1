@@ -2,6 +2,7 @@ param(
   [int]$Port = 8000,
   [string]$HostAddress = "127.0.0.1",
   [string]$OpenPath = "/app?v=0122",
+  [string]$DataRoot = "",
   [switch]$Foreground,
   [switch]$NoBrowser
 )
@@ -10,6 +11,22 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
+$AppDir = Join-Path $Root "app\moth_pi_setup"
+if (-not (Test-Path $AppDir)) { throw "Cannot find app directory: $AppDir" }
+
+if (-not $DataRoot) {
+  $DataRoot = if ($env:LANTERN_DATA_ROOT) { $env:LANTERN_DATA_ROOT } else { Join-Path $AppDir "data" }
+}
+
+$DataRoot = [System.IO.Path]::GetFullPath($DataRoot)
+$UploadRoot = Join-Path $DataRoot "uploads"
+New-Item -ItemType Directory -Path $DataRoot -Force | Out-Null
+New-Item -ItemType Directory -Path $UploadRoot -Force | Out-Null
+
+$env:MOTH_PROJECT_ROOT = $AppDir
+$env:MOTH_DATA_DIR = $DataRoot
+$env:MOTH_DB_PATH = Join-Path $DataRoot "moth.sqlite"
+$env:MOTH_UPLOAD_DIR = $UploadRoot
 $env:LANTERN_IMPORT_QUALITY_MODE = if ($env:LANTERN_IMPORT_QUALITY_MODE) { $env:LANTERN_IMPORT_QUALITY_MODE } else { "standard" }
 
 function Test-LanternRuntime {
@@ -44,9 +61,6 @@ if (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue) {
     ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
 }
 
-$AppDir = Join-Path $Root "app\moth_pi_setup"
-if (-not (Test-Path $AppDir)) { throw "Cannot find app directory: $AppDir" }
-
 $logs = Join-Path $Root "logs"
 New-Item -ItemType Directory -Path $logs -Force | Out-Null
 $outLog = Join-Path $logs "lantern_stdout.log"
@@ -55,6 +69,8 @@ $url = "http://$HostAddress`:$Port$OpenPath"
 
 Write-Host "Starting LANTERN on $url"
 Write-Host "Eagle Eye Innovations launch runtime"
+Write-Host "Data root: $env:MOTH_DATA_DIR"
+Write-Host "Database: $env:MOTH_DB_PATH"
 Write-Host "Import quality mode: $env:LANTERN_IMPORT_QUALITY_MODE"
 
 if ($Foreground) {

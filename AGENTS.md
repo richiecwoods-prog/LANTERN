@@ -36,4 +36,5 @@ python -m py_compile app\moth_pi_setup\moth_analysis\api.py
 - Keep standalone static pages usable where they already exist; avoid forcing a single linear workflow.
 - Do not commit real `.env` files, SQLite databases, scan CSVs, uploads, logs, build products, release packages, or backup folders.
 - Keep generated desktop packages under `build/`, `dist/`, or `releases/`, which are ignored.
+- Prefer `Start_LANTERN_Local.ps1 -DataRoot C:\LANTERN-data` or `LANTERN_DATA_ROOT` when running a cloned repo on a travel machine.
 - Ask before adding large binary assets or new production dependencies.

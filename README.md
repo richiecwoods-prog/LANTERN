@@ -23,10 +23,22 @@ From the repository root:
 .\Start_LANTERN_Local.ps1
 ```
 
+For the recommended travel layout, keep runtime data outside the Git repository:
+
+```powershell
+.\Start_LANTERN_Local.ps1 -DataRoot C:\LANTERN-data
+```
+
 The desktop wrapper can be started with:
 
 ```powershell
 .\LANTERN_App.ps1
+```
+
+The wrapper accepts the same external data root:
+
+```powershell
+.\LANTERN_App.ps1 -DataRoot C:\LANTERN-data
 ```
 
 ## API Development
