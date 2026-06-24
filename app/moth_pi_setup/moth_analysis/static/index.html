@@ -33,6 +33,8 @@
     .collection-list { max-height: 180px; overflow: auto; background: #181818; border-radius: 6px; padding: 8px; border: 1px solid #333; }
     .collection-item { display: grid; grid-template-columns: 20px 1fr auto; gap: 6px; align-items: start; padding: 5px 0; border-bottom: 1px solid #2a2a2a; }
     .collection-item:last-child { border-bottom: none; }
+    .aoi-result { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 8px; margin-top: 7px; border: 1px solid #333; border-radius: 8px; background: #181818; }
+    .aoi-result button { width: auto; min-width: 88px; margin-top: 0; }
     .mini { font-size: 11px; color: #999; }
     .toolbar { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
     .toolbar button, .presetbar button, .actionbar button { font-size: 12px; padding: 6px; }
@@ -78,6 +80,15 @@
     .danger { background:#4a1e1e; }
     .danger:hover { background:#622525; }
     .version { float:right; color:#aaa; font-size:11px; font-weight:500; }
+    .mode-banner { border:1px solid #41566e; border-left:5px solid #48a6ff; border-radius:8px; padding:9px; margin:9px 0; background:linear-gradient(90deg,rgba(30,82,124,.48),rgba(18,24,32,.82)); }
+    .mode-banner b { display:block; font-size:13px; color:#f0f6ff; }
+    .mode-banner span { display:block; color:#b7c7d8; font-size:11px; margin-top:2px; }
+    body.map-mode-candidates #panel { border-left:5px solid #9b5cff; }
+    body.map-mode-candidates .mode-banner { border-left-color:#9b5cff; background:linear-gradient(90deg,rgba(70,42,114,.58),rgba(18,24,32,.82)); }
+    body.map-mode-candidates #plainSummary { border-color:#6f56a5; background:#181326; }
+    body.map-mode-candidates #quickActions .secondary { background:#35234f; border-color:#745aa5; }
+    body.map-mode-h3 #panel { border-left:5px solid #48a6ff; }
+    body.map-mode-h3 .mode-banner { border-left-color:#48a6ff; }
 
     #compareWindow { position: absolute; top: 12px; right: 12px; width: 760px; max-width: calc(100vw - 500px); max-height: calc(100vh - 24px); overflow:auto; background: rgba(18,18,18,.96); border: 1px solid #444; border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.55); padding: 12px; z-index: 4; display: none; }
     .banner { border-radius: 8px; padding: 9px; margin-top: 8px; font-size: 12px; border: 1px solid #5a4a22; background: rgba(80,60,20,.45); color: #ffe7a5; }
@@ -141,6 +152,7 @@
 </div>
 <div id="panel">
   <h1>MOTH Data Analysis <span class="version">UI v0.6.0</span></h1>
+  <div id="modeBanner" class="mode-banner"><b id="modeTitle">Map / H3 Layers</b><span id="modeSub">AOI, H3 cells, RF burden and raw spatial evidence</span></div>
   <div class="muted">Multi-scan RF overlay for MOTH/LAMP CSV data. The main view is now small hexagons: green = better antenna-placement evidence, amber = check, red = poor/unproven. Raw points are optional because they block the map.</div>
   <button class="primary big-action" type="button" onclick="openGraph()">Show line graph for current map filters</button>
   <div class="actionbar">
@@ -158,7 +170,7 @@
   <label><input id="useMissionAoi" type="checkbox" checked /> Filter map layers to shared AOI</label>
   <div class="row">
     <div><label>AOI options</label><select id="mapAoiSelect" onchange="applySelectedMapAoi()"><option value="">Loading AOI options...</option></select></div>
-    <div><label>Search AOI</label><input id="mapAoiSearch" placeholder="Lincoln, UK, HCMM, or 53.2307, -0.5406, 25 km" /></div>
+    <div><label>Search AOI</label><input id="mapAoiSearch" placeholder="Lincoln, UK, HCMM, or 53.2307, -0.5406, 25 km" onkeydown="if(event.key==='Enter'){event.preventDefault();searchMapAoi();}" /></div>
   </div>
   <div class="row">
     <div><button type="button" onclick="searchMapAoi()">Search AOI</button></div>
@@ -323,6 +335,29 @@ let missionContext = null;
 let mapAoiResults = [];
 let mapAoiOptions = [];
 
+function workspaceMode() {
+  const params = new URLSearchParams(location.search || '');
+  if ((params.get('map_mode') || '').toLowerCase() === 'candidates' || location.hash === '#candidates') return 'candidates';
+  return 'h3';
+}
+
+function applyWorkspaceMode() {
+  const mode = workspaceMode();
+  document.body.classList.add(`map-mode-${mode}`);
+  document.body.dataset.mapMode = mode;
+  const title = document.getElementById('modeTitle');
+  const sub = document.getElementById('modeSub');
+  if (mode === 'candidates') {
+    if (title) title.textContent = 'Candidate Engineering';
+    if (sub) sub.textContent = 'Candidate pins, scoring, comparison and assessment evidence';
+  } else {
+    if (title) title.textContent = 'Map / H3 Layers';
+    if (sub) sub.textContent = 'AOI, H3 cells, RF burden and raw spatial evidence';
+  }
+}
+
+applyWorkspaceMode();
+
 const map = new maplibregl.Map({
   container: 'map',
   center: [-0.5406, 53.2307],
@@ -454,13 +489,24 @@ function renderMapAoiResults(items) {
     box.innerHTML = '<span class="muted">No AOI match. Try coordinates as lat, lon, radius km.</span>';
     return;
   }
-  box.innerHTML = mapAoiResults.map((r,i) => `<div class="collection-item"><div><b>${esc(r.label)}</b><div class="mini">${esc(r.source || 'source')} | ${esc(r.lat)}, ${esc(r.lon)} | radius ${esc(Math.round(r.radius_m || 0))} m${r.valid_event_count ? ` | ${esc(r.valid_event_count)} events` : ''}</div></div><button type="button" onclick="applyMapAoi(${i})">Use</button></div>`).join('');
+  box.innerHTML = mapAoiResults.map((r,i) => `<div class="aoi-result"><div><b>${esc(r.label)}</b><div class="mini">${esc(r.source || 'source')} | ${esc(r.lat)}, ${esc(r.lon)} | radius ${esc(Math.round(r.radius_m || 0))} m${r.valid_event_count ? ` | ${esc(r.valid_event_count)} events` : ''}</div></div><button type="button" onclick="applyMapAoi(${i})">Use AOI</button></div>`).join('');
 }
 
 async function searchMapAoi() {
   const q = document.getElementById('mapAoiSearch').value || '';
-  const data = await getJson(`${api}/api/platform/aoi/search?q=${encodeURIComponent(q)}`);
-  renderMapAoiResults(data.results || []);
+  const box = document.getElementById('mapAoiResults');
+  if (box) box.textContent = 'Searching AOI...';
+  try {
+    const data = await getJson(`${api}/api/platform/aoi/search?q=${encodeURIComponent(q)}&limit=10`);
+    const results = data.results || [];
+    renderMapAoiResults(results);
+    if (results.length === 1) {
+      await applyMapAoi(0);
+      if (box) box.innerHTML = `<span class="muted">Applied AOI: ${esc(results[0].label)}. Map and J2 now use this AOI.</span>`;
+    }
+  } catch (err) {
+    if (box) box.textContent = `AOI search failed: ${err.message || err}`;
+  }
 }
 
 async function applySelectedMapAoi() {
@@ -488,6 +534,7 @@ async function applyMapAoi(index) {
   document.getElementById('useMissionAoi').checked = true;
   fitMapToAoi();
   await refreshAll({reloadTimeBounds:true});
+  setStatus(`Shared AOI applied: ${r.label}`);
 }
 
 function addOrUpdateSource(id, data) {

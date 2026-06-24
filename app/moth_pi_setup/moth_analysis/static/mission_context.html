@@ -31,7 +31,7 @@
         <p class="muted">Select a known/uploaded AOI, or search by place, airfield code, misspelling, or coordinates such as <code>53.2307, -0.5406, 25 km</code>.</p>
         <label class="muted">AOI options</label>
         <select id="aoiSelect" onchange="applySelectedAoi()"><option value="">Loading AOI options...</option></select>
-        <div class="btnrow"><input id="aoiSearch" value="Lincoln, UK" aria-label="AOI search"/><button type="button" onclick="searchAoi()">Search</button></div>
+        <div class="btnrow"><input id="aoiSearch" value="Lincoln, UK" aria-label="AOI search" onkeydown="if(event.key==='Enter'){event.preventDefault();searchAoi();}"/><button type="button" onclick="searchAoi()">Search</button></div>
         <div id="aoiResults" class="small">Search results will appear here.</div>
       </div>
       <div class="card span-6">
@@ -78,7 +78,7 @@
       if(!latestResults.length){$('aoiResults').innerHTML='<p class="muted">No AOI match. Try coordinates as lat, lon, radius km.</p>';return;}
       $('aoiResults').innerHTML=latestResults.map((r,i)=>`<div class="aoiResult"><div><b>${esc(r.label)}</b><div class="muted">${esc(r.source||'source')} | ${esc(r.lat)}, ${esc(r.lon)} | radius ${esc(Math.round(r.radius_m||0))} m${r.valid_event_count?` | ${esc(r.valid_event_count)} events`:''}</div></div><button type="button" onclick="applyAoi(${i})">Use AOI</button></div>`).join('');
     }
-    async function searchAoi(){try{const data=await json('/api/platform/aoi/search?q='+encodeURIComponent($('aoiSearch').value||''));renderResults(data.results||[]);}catch(e){$('aoiResults').textContent=String(e.message||e);}}
+    async function searchAoi(){try{$('aoiResults').textContent='Searching AOI...';const data=await json('/api/platform/aoi/search?q='+encodeURIComponent($('aoiSearch').value||'')+'&limit=10');const results=data.results||[];renderResults(results);if(results.length===1){await applyAoi(0);$('aoiResults').innerHTML='<p class="muted">Applied AOI: '+esc(results[0].label)+'. Map and J2 now use this AOI.</p>';}}catch(e){$('aoiResults').textContent=String(e.message||e);}}
     async function loadAoiOptions(){try{const data=await json('/api/platform/aoi/search?limit=20');populateOptions(data.results||[]);}catch(e){$('aoiSelect').innerHTML='<option value="">AOI options unavailable</option>';}}
     async function applySelectedAoi(){const value=$('aoiSelect').value;if(value==='')return;const idx=Number(value);if(Number.isNaN(idx)||idx<0)return;latestResults=optionResults;await applyAoi(idx);}
     async function applyAoi(i){

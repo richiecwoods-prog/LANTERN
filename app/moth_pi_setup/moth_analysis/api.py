@@ -22,6 +22,7 @@ from .geo import clamp, haversine_m
 from .h3tools import cell_to_boundary_lnglat, latlon_to_cell
 from .ingest import insert_candidate_site, insert_collection_from_csv
 from .scoring import percentile, score_candidate_sites
+from .source_location import SourceLocationConfig, build_source_location_result
 from .quality import (
     get_latest_quality_summary,
     load_and_clean_csv,
@@ -1033,6 +1034,256 @@ def query_events_for_map(
     ).fetchall())
     conn.close()
     return rows
+
+
+def query_events_for_source_location(
+    *,
+    collection_id: int | None = None,
+    collection_ids: str | None = None,
+    suspicious_only: bool = True,
+    suspicious_min_dbm: float | None = -60.0,
+    min_dbm: float | None = None,
+    target_min_hz: float | None = None,
+    target_max_hz: float | None = None,
+    start_utc: str | None = None,
+    end_utc: str | None = None,
+    aoi: str | None = "mission",
+    aoi_radius_m: float | None = None,
+    max_rows: int = 200000,
+) -> list[dict[str, Any]]:
+    where = [
+        "e.valid = 1",
+        "e.timestamp_utc IS NOT NULL",
+        "e.lat IS NOT NULL",
+        "e.lon IS NOT NULL",
+        "e.frequency_hz IS NOT NULL",
+        "e.strength_dbm IS NOT NULL",
+    ]
+    params: list[Any] = []
+    ids = parse_collection_ids(collection_id=collection_id, collection_ids=collection_ids)
+    if ids:
+        placeholders = ",".join("?" for _ in ids)
+        where.append(f"e.collection_id IN ({placeholders})")
+        params.extend(ids)
+    effective_min_dbm = min_dbm
+    if suspicious_only:
+        suspicious_threshold = -60.0 if suspicious_min_dbm is None else float(suspicious_min_dbm)
+        effective_min_dbm = suspicious_threshold if effective_min_dbm is None else max(float(effective_min_dbm), suspicious_threshold)
+    if effective_min_dbm is not None:
+        where.append("e.strength_dbm >= ?")
+        params.append(effective_min_dbm)
+    if target_min_hz is not None:
+        where.append("e.frequency_hz >= ?")
+        params.append(target_min_hz)
+    if target_max_hz is not None:
+        where.append("e.frequency_hz <= ?")
+        params.append(target_max_hz)
+    if start_utc:
+        where.append("e.timestamp_utc >= ?")
+        params.append(start_utc)
+    if end_utc:
+        where.append("e.timestamp_utc <= ?")
+        params.append(end_utc)
+    rec = _aoi_resolve(aoi, radius_m=aoi_radius_m)
+    if rec:
+        bounds = rec.get("bounds") or {}
+        where.append("e.lat BETWEEN ? AND ?")
+        params.extend([bounds["min_lat"], bounds["max_lat"]])
+        where.append("e.lon BETWEEN ? AND ?")
+        params.extend([bounds["min_lon"], bounds["max_lon"]])
+    params.append(max(1, min(int(max_rows), 500000)))
+    conn = connect()
+    try:
+        rows = rows_to_dicts(conn.execute(
+            f"""
+            SELECT e.event_id,
+                   e.collection_id,
+                   c.collection_name,
+                   c.device_serial,
+                   c.file_name,
+                   e.timestamp_utc,
+                   e.lat,
+                   e.lon,
+                   e.frequency_hz,
+                   e.strength_dbm
+            FROM moth_events e
+            JOIN moth_collections c ON c.collection_id = e.collection_id
+            WHERE {" AND ".join(where)}
+            ORDER BY e.timestamp_utc ASC, e.event_id ASC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall())
+    finally:
+        conn.close()
+    return rows
+
+
+def source_location_payload(
+    *,
+    include_heatmap: bool,
+    collection_id: int | None = None,
+    collection_ids: str | None = None,
+    suspicious_only: bool = True,
+    suspicious_min_dbm: float | None = -60.0,
+    min_dbm: float | None = None,
+    target_min_hz: float | None = None,
+    target_max_hz: float | None = None,
+    start_utc: str | None = None,
+    end_utc: str | None = None,
+    aoi: str | None = "mission",
+    aoi_radius_m: float | None = None,
+    time_bucket_s: int = 5,
+    frequency_bin_hz: float = 1_000_000.0,
+    min_collections: int = 2,
+    min_receiver_spread_m: float = 10.0,
+    path_loss_exponent: float = 2.0,
+    grid_size: int = 36,
+    max_groups: int = 24,
+    max_rows: int = 200000,
+) -> dict[str, Any]:
+    rows = query_events_for_source_location(
+        collection_id=collection_id,
+        collection_ids=collection_ids,
+        suspicious_only=suspicious_only,
+        suspicious_min_dbm=suspicious_min_dbm,
+        min_dbm=min_dbm,
+        target_min_hz=target_min_hz,
+        target_max_hz=target_max_hz,
+        start_utc=start_utc,
+        end_utc=end_utc,
+        aoi=aoi,
+        aoi_radius_m=aoi_radius_m,
+        max_rows=max_rows,
+    )
+    config = SourceLocationConfig(
+        time_bucket_s=max(1, int(time_bucket_s)),
+        frequency_bin_hz=max(1.0, float(frequency_bin_hz)),
+        min_collections=max(2, int(min_collections)),
+        min_receiver_spread_m=max(0.0, float(min_receiver_spread_m)),
+        path_loss_exponent=max(1.0, min(5.0, float(path_loss_exponent))),
+    )
+    payload = build_source_location_result(
+        rows,
+        config=config,
+        include_heatmap=include_heatmap,
+        grid_size=grid_size,
+        max_groups=max_groups,
+        event_label="suspicious RF ping" if suspicious_only else "RF detection",
+    )
+    payload["filters"] = {
+        "collection_id": collection_id,
+        "collection_ids": collection_ids,
+        "suspicious_only": suspicious_only,
+        "suspicious_min_dbm": suspicious_min_dbm,
+        "min_dbm": min_dbm,
+        "target_min_hz": target_min_hz,
+        "target_max_hz": target_max_hz,
+        "start_utc": start_utc,
+        "end_utc": end_utc,
+        "aoi": aoi,
+        "aoi_radius_m": aoi_radius_m,
+        "max_rows": max_rows,
+    }
+    payload["input_event_type"] = "suspicious_rf_pings" if suspicious_only else "all_matching_rf_detections"
+    payload["suspicious_ping_policy"] = {
+        "enabled": bool(suspicious_only),
+        "threshold_dbm": suspicious_min_dbm if suspicious_only else None,
+        "selection": "strength_dbm_at_or_above_threshold" if suspicious_only else "all_matching_valid_rows",
+    }
+    payload["page_url"] = "/engineering/source-location?v=0122"
+    payload["generated_utc"] = iso_no_ms(datetime.now(timezone.utc))
+    return payload
+
+
+@app.get("/api/source-location/status")
+def source_location_status(
+    collection_id: int | None = None,
+    collection_ids: str | None = None,
+    suspicious_only: bool = Query(default=True),
+    suspicious_min_dbm: float = Query(default=-60.0, ge=-160, le=50),
+    min_dbm: float | None = None,
+    target_min_hz: float | None = None,
+    target_max_hz: float | None = None,
+    start_utc: str | None = None,
+    end_utc: str | None = None,
+    aoi: str | None = "mission",
+    aoi_radius_m: float | None = Query(default=None, ge=100, le=500000),
+    time_bucket_s: int = Query(default=5, ge=1, le=3600),
+    frequency_bin_hz: float = Query(default=1_000_000.0, ge=1, le=200_000_000),
+    min_collections: int = Query(default=2, ge=2, le=12),
+    min_receiver_spread_m: float = Query(default=10.0, ge=0, le=50000),
+    path_loss_exponent: float = Query(default=2.0, ge=1.0, le=5.0),
+    max_groups: int = Query(default=12, ge=1, le=100),
+    max_rows: int = Query(default=200000, ge=100, le=500000),
+) -> dict[str, Any]:
+    return source_location_payload(
+        include_heatmap=False,
+        collection_id=collection_id,
+        collection_ids=collection_ids,
+        suspicious_only=suspicious_only,
+        suspicious_min_dbm=suspicious_min_dbm,
+        min_dbm=min_dbm,
+        target_min_hz=target_min_hz,
+        target_max_hz=target_max_hz,
+        start_utc=start_utc,
+        end_utc=end_utc,
+        aoi=aoi,
+        aoi_radius_m=aoi_radius_m,
+        time_bucket_s=time_bucket_s,
+        frequency_bin_hz=frequency_bin_hz,
+        min_collections=min_collections,
+        min_receiver_spread_m=min_receiver_spread_m,
+        path_loss_exponent=path_loss_exponent,
+        max_groups=max_groups,
+        max_rows=max_rows,
+    )
+
+
+@app.get("/api/source-location/heatmap")
+def source_location_heatmap(
+    collection_id: int | None = None,
+    collection_ids: str | None = None,
+    suspicious_only: bool = Query(default=True),
+    suspicious_min_dbm: float = Query(default=-60.0, ge=-160, le=50),
+    min_dbm: float | None = None,
+    target_min_hz: float | None = None,
+    target_max_hz: float | None = None,
+    start_utc: str | None = None,
+    end_utc: str | None = None,
+    aoi: str | None = "mission",
+    aoi_radius_m: float | None = Query(default=None, ge=100, le=500000),
+    time_bucket_s: int = Query(default=5, ge=1, le=3600),
+    frequency_bin_hz: float = Query(default=1_000_000.0, ge=1, le=200_000_000),
+    min_collections: int = Query(default=2, ge=2, le=12),
+    min_receiver_spread_m: float = Query(default=10.0, ge=0, le=50000),
+    path_loss_exponent: float = Query(default=2.0, ge=1.0, le=5.0),
+    grid_size: int = Query(default=36, ge=12, le=80),
+    max_groups: int = Query(default=24, ge=1, le=100),
+    max_rows: int = Query(default=200000, ge=100, le=500000),
+) -> dict[str, Any]:
+    return source_location_payload(
+        include_heatmap=True,
+        collection_id=collection_id,
+        collection_ids=collection_ids,
+        suspicious_only=suspicious_only,
+        suspicious_min_dbm=suspicious_min_dbm,
+        min_dbm=min_dbm,
+        target_min_hz=target_min_hz,
+        target_max_hz=target_max_hz,
+        start_utc=start_utc,
+        end_utc=end_utc,
+        aoi=aoi,
+        aoi_radius_m=aoi_radius_m,
+        time_bucket_s=time_bucket_s,
+        frequency_bin_hz=frequency_bin_hz,
+        min_collections=min_collections,
+        min_receiver_spread_m=min_receiver_spread_m,
+        path_loss_exponent=path_loss_exponent,
+        grid_size=grid_size,
+        max_groups=max_groups,
+        max_rows=max_rows,
+    )
 
 
 def dt_bucket_summary(events: list[dict[str, Any]], bucket_seconds: int | None = None) -> dict[str, Any]:
@@ -6378,6 +6629,16 @@ def _v012_static_page(name: str, fallback_title: str = "LANTERN") -> str:
     return f"""<!doctype html><html><head><meta charset='utf-8'><title>{fallback_title}</title></head><body><h1>{fallback_title}</h1><p>Missing static page: {name}</p><p><a href='/app?v=0122'>Return to LANTERN Home</a></p></body></html>"""
 
 
+def _v012_add_query_param(url: str, key: str, value: str) -> str:
+    if not url:
+        return url
+    base, marker, fragment = url.partition("#")
+    if f"{key}=" not in base:
+        sep = "&" if "?" in base else "?"
+        base = f"{base}{sep}{key}={value}"
+    return f"{base}{marker}{fragment}" if marker else base
+
+
 def _v012_frame_page(title: str, source_url: str, nav_group: str) -> str:
     """Render a canonical route as one platform shell plus an embedded legacy working page.
 
@@ -6386,17 +6647,33 @@ def _v012_frame_page(title: str, source_url: str, nav_group: str) -> str:
     does not mount a second platform shell.
     """
     safe_title = str(title).replace("<", "&lt;").replace(">", "&gt;")
-    src = source_url
-    sep = "&" if "?" in src else "?"
-    if "eei_embed=1" not in src:
-        src = f"{src}{sep}eei_embed=1"
-    legacy_kind = "map" if ("index.html" in src or "#candidates" in src) else "legacy"
+    src = _v012_add_query_param(source_url, "eei_embed", "1")
+    legacy_kind = "survey-map" if ("index.html" in source_url or "#candidates" in source_url) else "legacy"
+    if "map_mode=candidates" in source_url or "#candidates" in source_url:
+        legacy_kind = "candidate-map"
     if "launch_analysis" in src:
         legacy_kind = "rf"
     elif "j2_report" in src:
         legacy_kind = "j2"
     elif "lantern_flight_safety" in src:
         legacy_kind = "flight-safety"
+    mode_meta = {
+        "survey-map": {
+            "title": "Survey Map / H3",
+            "summary": "AOI, H3 cells, RF burden and raw spatial evidence",
+            "chips": ["AOI", "H3", "RF burden"],
+        },
+        "candidate-map": {
+            "title": "Candidate Engineering",
+            "summary": "Candidate pins, scoring, comparison and assessment evidence",
+            "chips": ["Sites", "Scores", "Reports"],
+        },
+    }
+    mode = mode_meta.get(legacy_kind)
+    mode_strip = ""
+    if mode:
+        chips = "".join(f"<span>{chip}</span>" for chip in mode["chips"])
+        mode_strip = f"""<div class="eei-map-mode-strip eei-{legacy_kind}"><strong>{mode["title"]}</strong><em>{mode["summary"]}</em><div>{chips}</div></div>"""
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>{safe_title}</title>
@@ -6405,9 +6682,17 @@ def _v012_frame_page(title: str, source_url: str, nav_group: str) -> str:
 html,body{{margin:0;height:100%;overflow:hidden;background:#151b22}}
 body[data-lantern-wrapper="true"]{{display:flex;flex-direction:column;min-height:100vh}}
 .noscript{{color:#dfe6ed;background:#202830;border:1px solid #56616d;padding:12px;margin:12px;border-radius:8px}}
+.eei-map-mode-strip{{display:flex;align-items:center;gap:10px;min-height:38px;padding:7px 14px;border-bottom:1px solid #4b5968;background:#17202a;color:#dfe7ef;font-family:Arial,Helvetica,sans-serif}}
+.eei-map-mode-strip strong{{font-size:13px;font-weight:950;white-space:nowrap}}
+.eei-map-mode-strip em{{font-style:normal;color:#b8c4d0;font-size:11px;flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.eei-map-mode-strip div{{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}}
+.eei-map-mode-strip span{{display:inline-flex;border:1px solid #647180;border-radius:999px;padding:3px 7px;font-size:10.5px;font-weight:900;color:#e6edf5;background:#202a35}}
+.eei-map-mode-strip.eei-survey-map{{border-left:5px solid #2c89d1;background:linear-gradient(90deg,#102132,#17202a)}}
+.eei-map-mode-strip.eei-candidate-map{{border-left:5px solid #9b5cff;background:linear-gradient(90deg,#241b34,#17202a)}}
 </style>
 </head><body data-lantern-wrapper="true" data-nav-group="{nav_group}" data-legacy-kind="{legacy_kind}">
 <noscript><div class="noscript">JavaScript is required for the LANTERN platform shell. Open the legacy page directly: <a href="{src}">{safe_title}</a></div></noscript>
+{mode_strip}
 <main class="eei-frame-stage" aria-label="{safe_title}">
   <iframe id="eeiLegacyFrame" title="{safe_title}" src="{src}" loading="eager"></iframe>
 </main>
@@ -6432,6 +6717,7 @@ body[data-lantern-wrapper="true"]{{display:flex;flex-direction:column;min-height
       var kind=document.body.getAttribute('data-legacy-kind') || 'legacy';
       doc.documentElement.classList.add('eei-embedded-legacy');
       doc.body && doc.body.classList.add('eei-embedded-legacy-body','eei-embedded-' + kind);
+      if(doc.body && (kind === 'survey-map' || kind === 'candidate-map')) doc.body.classList.add('eei-embedded-map');
       if(!doc.getElementById('eei-embedded-cleanup-style')){{
         var style=doc.createElement('style');
         style.id='eei-embedded-cleanup-style';
@@ -6512,6 +6798,7 @@ def _v012_nav_registry() -> dict[str, _V012Any]:
             {"key": "j2", "title": "J2 Live Report", "url": "/reporting/j2?v=0122", "legacy_url": "/static/j2_report.html?v=115", "description": "OSINT articles, threat actors, aviation/security context and source log."},
             {"key": "gnss-serviceability", "title": "GNSS Serviceability", "url": "/reporting/gnss-serviceability?v=0122", "description": "GPS/GNSS serviceability decision support and required receiver checks."},
             {"key": "candidate-report", "title": "Candidate Site Report", "url": "/reporting/candidate?v=0122", "description": "End-state antenna/candidate report and PDF entry point."},
+            {"key": "source-location-report", "title": "Likely Source Report", "url": "/reporting/source-location?v=0122", "description": "Report-first output for RSSI likely-source analysis from concurrent suspicious pings."},
             {"key": "evidence-log", "title": "Source / Evidence Log", "url": "/reporting/evidence-log?v=0122", "description": "Traceable collections, OSINT/source items and evidence register."},
             {"key": "export-pack", "title": "Export Pack", "url": "/reporting/export?v=0122", "description": "Mission report, J2 source log, candidate assessment and archive links."},
         ],
@@ -6521,6 +6808,7 @@ def _v012_nav_registry() -> dict[str, _V012Any]:
             {"key": "spectrum", "title": "Spectrum / Spikes", "url": "/engineering/spectrum?v=0122", "legacy_url": "/static/launch_analysis.html?v=075#spectrum", "description": "Technical spectrum bins, dBm values, busy frequencies and abnormal spikes."},
             {"key": "map", "title": "Map / H3 Layers", "url": "/engineering/map?v=0122", "legacy_url": "/?v=0122", "description": "Raw map, H3 layers, RF burden, suitability and confidence overlays."},
             {"key": "candidates", "title": "Candidate Engineering", "url": "/engineering/candidates?v=0122", "legacy_url": "/?v=0122#candidates", "description": "Candidate scoring, comparison, evidence drill-down and engineering view."},
+            {"key": "source-location", "title": "Likely Source Heat Map", "url": "/engineering/source-location?v=0122", "description": "RSSI confidence heat map when overlapping suspicious RF pings exist."},
             {"key": "pattern-of-life", "title": "Pattern of Life", "url": "/engineering/pattern-of-life?v=0122", "description": "Recurring quiet/noisy periods by hour, day, week or month."},
             {"key": "imports", "title": "Import Diagnostics", "url": "/engineering/import-diagnostics?v=0122", "description": "CSV import, parser status, quality mode and source file notes."},
             {"key": "api-viewer", "title": "API Payload Viewer", "url": "/engineering/api-viewer?v=0122", "description": "Developer-facing endpoint/payload inspection without leaving the app."},
@@ -6619,7 +6907,7 @@ def _v012_static_file_checks() -> dict[str, bool]:
     names = [
         "platform_home.html", "mission_context.html", "reporting_home.html", "engineering_home.html", "system_home.html", "app_map.html",
         "api_viewer.html", "platform_shell.css", "platform_shell.js", "platform_navigation.json", "eei_tactical_eagle.svg", "lantern_flight_safety.html",
-        "mission_brief.html", "j2_report.html", "launch_analysis.html", "data_quality.html", "index.html",
+        "mission_brief.html", "j2_report.html", "launch_analysis.html", "source_location.html", "data_quality.html", "index.html",
     ]
     return {name: (static / name).exists() for name in names}
 
@@ -6693,6 +6981,11 @@ def lantern_v012_reporting_candidate() -> str:
     return _v012_static_page("candidate_report.html", "LANTERN Candidate Site Report")
 
 
+@app.get("/reporting/source-location", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_reporting_source_location() -> str:
+    return _v012_static_page("source_location.html", "LANTERN Likely Source Report")
+
+
 @app.get("/reporting/evidence-log", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_reporting_evidence_log() -> str:
     return _v012_static_page("evidence_log.html", "LANTERN Source / Evidence Log")
@@ -6720,12 +7013,17 @@ def lantern_v012_engineering_spectrum() -> str:
 
 @app.get("/engineering/map", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_engineering_map() -> str:
-    return _v012_frame_page("LANTERN Map / H3 Layers", "/static/index.html?v=0122", "engineering")
+    return _v012_frame_page("LANTERN Map / H3 Layers", "/static/index.html?v=0122&map_mode=h3", "engineering")
 
 
 @app.get("/engineering/candidates", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_engineering_candidates() -> str:
-    return _v012_frame_page("LANTERN Candidate Engineering", "/static/index.html?v=0122#candidates", "engineering")
+    return _v012_frame_page("LANTERN Candidate Engineering", "/static/index.html?v=0122&map_mode=candidates#candidates", "engineering")
+
+
+@app.get("/engineering/source-location", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_engineering_source_location() -> str:
+    return _v012_static_page("source_location.html", "LANTERN Likely Source Heat Map")
 
 
 @app.get("/engineering/pattern-of-life", response_class=_V012HTMLResponse)  # type: ignore[name-defined]

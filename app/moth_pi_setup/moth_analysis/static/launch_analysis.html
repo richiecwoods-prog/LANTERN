@@ -40,6 +40,10 @@
   .analyst { border-left:4px solid var(--check); background:#18160d; }
   .bigreadout { font-size:18px; font-weight:800; }
   .axisLabel { color:#d8dde4; font-weight:700; }
+  .source-link { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; box-sizing:border-box; padding:8px; margin-top:8px; border-radius:6px; border:1px solid #4a6f99; background:#253145; color:#eee; text-decoration:none; font-weight:800; }
+  .source-link.disabled { opacity:.58; border-color:#4b515c; background:#252a32; }
+  .source-link.ready { border-color:#2ca35c; background:#176236; }
+  .source-badge { display:inline-flex; border:1px solid #526173; border-radius:999px; padding:2px 7px; font-size:11px; color:#dce7f3; background:#101720; white-space:nowrap; }
 </style>
   <link rel="stylesheet" href="/static/lantern_nav.css" />
   <link rel="stylesheet" href="/static/platform_shell.css?v=0127" />
@@ -84,6 +88,7 @@
     <button onclick="loadGnssTimeline()">Show L1 / L2 / L5 over time</button>
     <button onclick="loadSpectrum()">Traditional spectrum + abnormal spikes</button>
     <button onclick="runAll()">Run all analysis sections</button>
+    <a id="sourceLocationButton" class="source-link disabled" href="/engineering/source-location?v=0122">Likely source heat map <span id="sourceLocationBadge" class="source-badge">checking</span></a>
     <h2>Status</h2><div id="status" class="status">Ready.</div>
   </section>
 
@@ -303,7 +308,23 @@ async function runAll() {
   await loadGnssTimeline();
   await loadSpectrum();
 }
+async function updateSourceLocationButton() {
+  try {
+    const data = await getJson(`${api}/api/source-location/status?${q({time_bucket_s:5, frequency_bin_hz:1000000, min_receiver_spread_m:10})}`);
+    const button = document.getElementById('sourceLocationButton');
+    const badge = document.getElementById('sourceLocationBadge');
+    if (!button || !badge) return;
+    button.classList.toggle('ready', !!data.analysis_ready);
+    button.classList.toggle('disabled', !data.analysis_ready);
+    badge.textContent = data.analysis_ready ? 'ready' : 'no overlap';
+    button.title = data.state_label || '';
+  } catch (err) {
+    const badge = document.getElementById('sourceLocationBadge');
+    if (badge) badge.textContent = 'check';
+  }
+}
 document.addEventListener('click', e => { const b=e.target.closest&&e.target.closest('button'); if(b) b.blur(); }, true);
+updateSourceLocationButton();
 </script>
   <script src="/static/lantern_nav.js"></script>
   <script src="/static/platform_shell.js?v=0127" defer></script>

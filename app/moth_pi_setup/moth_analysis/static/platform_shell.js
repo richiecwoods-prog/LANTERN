@@ -17,6 +17,7 @@
         {title:'J2 Live Report', url:'/reporting/j2?v=0122', description:'OSINT articles, threat actors and source log.'},
         {title:'GNSS Serviceability', url:'/reporting/gnss-serviceability?v=0122', description:'GPS/GNSS serviceability decision support.'},
         {title:'Candidate Site Report', url:'/reporting/candidate?v=0122', description:'End-state antenna/candidate report and PDF entry point.'},
+        {title:'Likely Source Report', url:'/reporting/source-location?v=0122', description:'Likely-source output from concurrent suspicious pings.'},
         {title:'Evidence Log', url:'/reporting/evidence-log?v=0122', description:'Source and evidence register.'},
         {title:'Export Pack', url:'/reporting/export?v=0122', description:'Mission report, source log and archive links.'}
       ]},
@@ -26,6 +27,7 @@
         {title:'Spectrum / Spikes', url:'/engineering/spectrum?v=0122', description:'Technical bins, dBm values and abnormal spikes.'},
         {title:'Map / H3 Layers', url:'/engineering/map?v=0122', description:'Map, H3, suitability and confidence layers.'},
         {title:'Candidate Engineering', url:'/engineering/candidates?v=0122', description:'Candidate scoring and evidence drill-down.'},
+        {title:'Likely Source Heat Map', url:'/engineering/source-location?v=0122', description:'RSSI confidence heat map for concurrent suspicious pings.'},
         {title:'Pattern of Life', url:'/engineering/pattern-of-life?v=0122', description:'Recurring RF behaviour.'},
         {title:'Import Diagnostics', url:'/engineering/import-diagnostics?v=0122', description:'CSV parser and quality mode.'},
         {title:'API Payload Viewer', url:'/engineering/api-viewer?v=0122', description:'Inspect JSON endpoints.'}

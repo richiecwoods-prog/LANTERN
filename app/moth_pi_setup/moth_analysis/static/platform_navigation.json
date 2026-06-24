@@ -13,6 +13,7 @@
     "J2 Live Report",
     "GNSS Serviceability",
     "Candidate Site Report",
+    "Likely Source Report",
     "Source / Evidence Log",
     "Export Pack"
   ],
@@ -22,6 +23,7 @@
     "Spectrum / Spikes",
     "Map / H3 Layers",
     "Candidate Engineering",
+    "Likely Source Heat Map",
     "Pattern of Life",
     "Import Diagnostics",
     "API Payload Viewer"

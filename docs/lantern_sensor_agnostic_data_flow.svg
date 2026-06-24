@@ -1,0 +1,147 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">LANTERN Sensor-Agnostic Data Flow</title>
+  <desc id="desc">Simple input, process, decision and output data flow for the LANTERN sensor-agnostic RF/GNSS analysis process.</desc>
+  <defs>
+    <style>
+      .page { fill: #ffffff; }
+      .title { font: 700 34px Arial, Helvetica, sans-serif; fill: #101820; }
+      .subtitle { font: 16px Arial, Helvetica, sans-serif; fill: #4b5563; }
+      .section { font: 700 18px Arial, Helvetica, sans-serif; fill: #101820; }
+      .box-title { font: 700 16px Arial, Helvetica, sans-serif; fill: #101820; }
+      .box-text { font: 13px Arial, Helvetica, sans-serif; fill: #243142; }
+      .small { font: 12px Arial, Helvetica, sans-serif; fill: #4b5563; }
+      .input { fill: #eef7ff; stroke: #2d6cdf; stroke-width: 2; }
+      .process { fill: #f7f7fb; stroke: #5b6472; stroke-width: 2; }
+      .decision { fill: #fff6df; stroke: #c88400; stroke-width: 2; }
+      .output { fill: #edf9f1; stroke: #23834c; stroke-width: 2; }
+      .reject { fill: #fff0ef; stroke: #c43d32; stroke-width: 2; }
+      .arrow { stroke: #303846; stroke-width: 2.2; fill: none; marker-end: url(#arrow); }
+      .arrow-no { stroke: #c43d32; stroke-width: 2.2; fill: none; marker-end: url(#arrow-red); }
+      .arrow-yes { stroke: #23834c; stroke-width: 2.2; fill: none; marker-end: url(#arrow-green); }
+      .label { font: 700 12px Arial, Helvetica, sans-serif; fill: #303846; }
+      .label-no { font: 700 12px Arial, Helvetica, sans-serif; fill: #a12821; }
+      .label-yes { font: 700 12px Arial, Helvetica, sans-serif; fill: #1b6e3e; }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#303846" />
+    </marker>
+    <marker id="arrow-red" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#c43d32" />
+    </marker>
+    <marker id="arrow-green" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#23834c" />
+    </marker>
+  </defs>
+
+  <rect class="page" width="1600" height="1000" />
+  <text class="title" x="60" y="58">LANTERN Sensor-Agnostic Data Flow</text>
+  <text class="subtitle" x="60" y="88">Input, output, process and basic decision points for patent-advisor review. Synthetic/high-level wording only.</text>
+
+  <text class="section" x="80" y="145">Inputs</text>
+  <text class="section" x="435" y="145">Process</text>
+  <text class="section" x="900" y="145">Decision Points</text>
+  <text class="section" x="1270" y="145">Outputs</text>
+
+  <rect class="input" x="60" y="175" width="290" height="98" rx="8" />
+  <text class="box-title" x="82" y="208">Sensor telemetry</text>
+  <text class="box-text" x="82" y="232">MOTH, SDR, GNSS monitor</text>
+  <text class="box-text" x="82" y="252">or other compatible scanner</text>
+
+  <rect class="input" x="60" y="305" width="290" height="98" rx="8" />
+  <text class="box-title" x="82" y="338">Mission context</text>
+  <text class="box-text" x="82" y="362">AOI, time window, selected</text>
+  <text class="box-text" x="82" y="382">collections and candidate sites</text>
+
+  <rect class="input" x="60" y="435" width="290" height="98" rx="8" />
+  <text class="box-title" x="82" y="468">Rules and thresholds</text>
+  <text class="box-text" x="82" y="492">GNSS bands, spike level,</text>
+  <text class="box-text" x="82" y="512">quality and confidence rules</text>
+
+  <rect class="process" x="420" y="210" width="310" height="105" rx="8" />
+  <text class="box-title" x="445" y="244">1. Import and normalise</text>
+  <text class="box-text" x="445" y="268">Map device-specific logs into</text>
+  <text class="box-text" x="445" y="288">common event fields</text>
+
+  <polygon class="decision" points="1010,205 1135,270 1010,335 885,270" />
+  <text class="box-title" x="950" y="258">Can record</text>
+  <text class="box-title" x="948" y="279">be mapped?</text>
+
+  <rect class="reject" x="1245" y="205" width="290" height="105" rx="8" />
+  <text class="box-title" x="1270" y="238">Reject or flag row</text>
+  <text class="box-text" x="1270" y="262">Reason recorded for data</text>
+  <text class="box-text" x="1270" y="282">quality and audit trail</text>
+
+  <rect class="process" x="420" y="370" width="310" height="115" rx="8" />
+  <text class="box-title" x="445" y="403">2. Quality gate and confidence</text>
+  <text class="box-text" x="445" y="428">Remove unusable rows and</text>
+  <text class="box-text" x="445" y="448">retain caveated evidence</text>
+
+  <polygon class="decision" points="1010,365 1135,430 1010,495 885,430" />
+  <text class="box-title" x="947" y="419">Enough clean</text>
+  <text class="box-title" x="968" y="440">evidence?</text>
+
+  <rect class="output" x="1245" y="370" width="290" height="115" rx="8" />
+  <text class="box-title" x="1270" y="403">Limited-confidence output</text>
+  <text class="box-text" x="1270" y="428">Collect more data, widen</text>
+  <text class="box-text" x="1270" y="448">filters or use caveats</text>
+
+  <rect class="process" x="420" y="540" width="310" height="125" rx="8" />
+  <text class="box-title" x="445" y="573">3. RF/GNSS analysis</text>
+  <text class="box-text" x="445" y="598">Band overlap, strong spikes,</text>
+  <text class="box-text" x="445" y="618">patterns, timing and proximity</text>
+
+  <polygon class="decision" points="1010,535 1135,605 1010,675 885,605" />
+  <text class="box-title" x="955" y="592">RF/GNSS burden</text>
+  <text class="box-title" x="970" y="613">acceptable?</text>
+
+  <rect class="reject" x="1245" y="540" width="290" height="125" rx="8" />
+  <text class="box-title" x="1270" y="573">Avoid, delay or re-scan</text>
+  <text class="box-text" x="1270" y="598">Output remains decision</text>
+  <text class="box-text" x="1270" y="618">support only</text>
+
+  <rect class="process" x="420" y="720" width="310" height="115" rx="8" />
+  <text class="box-title" x="445" y="753">4. Rank options</text>
+  <text class="box-text" x="445" y="778">Launch windows and candidate</text>
+  <text class="box-text" x="445" y="798">sites scored with confidence</text>
+
+  <rect class="output" x="1245" y="720" width="290" height="148" rx="8" />
+  <text class="box-title" x="1270" y="753">Operator outputs</text>
+  <text class="box-text" x="1270" y="778">Launch-window recommendation</text>
+  <text class="box-text" x="1270" y="798">Candidate-site recommendation</text>
+  <text class="box-text" x="1270" y="818">GNSS/serviceability brief</text>
+  <text class="box-text" x="1270" y="838">Evidence pack and caveats</text>
+
+  <rect class="output" x="60" y="720" width="290" height="115" rx="8" />
+  <text class="box-title" x="82" y="753">Data quality output</text>
+  <text class="box-text" x="82" y="778">Accepted, rejected and flagged</text>
+  <text class="box-text" x="82" y="798">records with reasons</text>
+
+  <path class="arrow" d="M350 224 H420" />
+  <path class="arrow" d="M350 354 C385 354 385 245 420 245" />
+  <path class="arrow" d="M350 484 C385 484 385 430 420 430" />
+  <path class="arrow" d="M730 262 H885" />
+  <path class="arrow-yes" d="M1010 335 C1010 355 760 355 730 397" />
+  <path class="arrow-no" d="M1135 270 H1245" />
+  <path class="arrow" d="M1390 310 V705" />
+  <path class="arrow" d="M420 428 H350 C325 428 325 720 350 760" />
+
+  <path class="arrow" d="M730 430 H885" />
+  <path class="arrow-no" d="M1135 430 H1245" />
+  <path class="arrow-yes" d="M1010 495 C1010 515 760 515 730 572" />
+
+  <path class="arrow" d="M730 602 H885" />
+  <path class="arrow-no" d="M1135 605 H1245" />
+  <path class="arrow-yes" d="M1010 675 C1010 700 760 700 730 758" />
+  <path class="arrow" d="M730 778 H1245" />
+
+  <text class="label-yes" x="1020" y="353">Yes</text>
+  <text class="label-no" x="1170" y="258">No</text>
+  <text class="label-yes" x="1020" y="513">Yes</text>
+  <text class="label-no" x="1170" y="418">No</text>
+  <text class="label-yes" x="1020" y="693">Yes</text>
+  <text class="label-no" x="1170" y="593">No</text>
+
+  <line x1="60" y1="910" x2="1540" y2="910" stroke="#d0d5dd" stroke-width="1" />
+  <text class="small" x="60" y="940">Boundary: LANTERN provides decision support only. It does not authorise flight, certify GNSS integrity, guarantee communications performance or attribute interference.</text>
+  <text class="small" x="60" y="965">Sensor-agnostic point: MOTH is one embodiment; compatible RF/GNSS telemetry from other scanners can enter the same normalised process.</text>
+</svg>
