@@ -18,9 +18,12 @@ def connect(db_path: Path | str = DB_PATH) -> sqlite3.Connection:
 
 def init_db(db_path: Path | str = DB_PATH) -> None:
     schema_path = Path(__file__).with_name("schema.sql")
-    with connect(db_path) as conn:
+    conn = connect(db_path)
+    try:
         conn.executescript(schema_path.read_text())
         conn.commit()
+    finally:
+        conn.close()
 
 
 def rows_to_dicts(rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:

@@ -1,37 +1,8 @@
 {
   "version": "0.12.0",
-  "primary": [
-    "Home",
-    "Mission Context",
-    "Reporting",
-    "Engineering",
-    "System"
-  ],
-  "reporting": [
-    "Flight Safety Brief",
-    "Mission Operations Brief",
-    "J2 Live Report",
-    "GNSS Serviceability",
-    "Candidate Site Report",
-    "Likely Source Report",
-    "Source / Evidence Log",
-    "Export Pack"
-  ],
-  "engineering": [
-    "Data Quality Detail",
-    "RF Analyst",
-    "Spectrum / Spikes",
-    "Map / H3 Layers",
-    "Candidate Engineering",
-    "Likely Source Heat Map",
-    "Pattern of Life",
-    "Import Diagnostics",
-    "API Payload Viewer"
-  ],
-  "system": [
-    "System Status",
-    "Deploy Check",
-    "Logs",
-    "App Map"
-  ]
+  "primary": ["Home", "Mission Context", "Ingest", "Reporting", "Engineering", "System"],
+  "ingest": ["Data Upload", "Live Sensors", "Import Diagnostics"],
+  "reporting": ["Flight Safety Brief", "Mission Operations Brief", "J2 Live Report", "GNSS Serviceability", "Candidate Site Report", "Likely Source Report", "Source / Evidence Log", "Export Pack"],
+  "engineering": ["Data Quality Detail", "RF Analyst", "Spectrum / Spikes", "Survey Map", "Candidate Engineering", "Likely Source Heat Map", "Pattern of Life", "API Payload Viewer"],
+  "system": ["System Status", "Deploy Check", "Logs", "App Map"]
 }

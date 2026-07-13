@@ -15,6 +15,7 @@
   .panel { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:14px; }
   label { display:block; font-size:12px; color:#bbb; margin-top:8px; }
   input, select, button { width:100%; box-sizing:border-box; padding:8px; background:#0f1115; color:#eee; border:1px solid #444; border-radius:6px; }
+  input[type="datetime-local"] { color-scheme: dark; }
   button { cursor:pointer; font-weight:700; margin-top:8px; background:#2a3440; touch-action: manipulation; }
   button:hover { background:#344355; }
   .primary { background:#176236; }
@@ -44,11 +45,54 @@
   .source-link.disabled { opacity:.58; border-color:#4b515c; background:#252a32; }
   .source-link.ready { border-color:#2ca35c; background:#176236; }
   .source-badge { display:inline-flex; border:1px solid #526173; border-radius:999px; padding:2px 7px; font-size:11px; color:#dce7f3; background:#101720; white-space:nowrap; }
+  .live-grid { display:grid; grid-template-columns:1.1fr 1.4fr; gap:10px; }
+  .live-card { background:#101720; border:1px solid #334150; border-radius:10px; padding:10px; }
+  .live-status { display:inline-flex; align-items:center; gap:6px; border:1px solid #526173; border-radius:999px; padding:4px 8px; font-size:11px; font-weight:900; background:#0d131b; }
+  .live-status:before { content:""; width:8px; height:8px; border-radius:50%; background:#7a8794; }
+  .live-status.good { border-color:#2a8b50; color:#c9f5d9; }
+  .live-status.good:before { background:var(--good); box-shadow:0 0 10px rgba(91,211,109,.45); }
+  .live-status.check { border-color:#9c7c1a; color:#ffe3a3; }
+  .live-status.check:before { background:var(--check); }
+  .live-status.poor { border-color:#9b3838; color:#ffd3d3; }
+  .live-status.poor:before { background:var(--poor); }
+  .live-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(125px,1fr)); gap:8px; margin:10px 0; }
+  .live-kpis .live-card b { display:block; font-size:20px; }
+  .live-kpis .live-card span { display:block; color:var(--muted); font-size:11px; margin-top:2px; }
+  .assistant-list { display:flex; flex-direction:column; gap:8px; }
+  .assistant-item { border:1px solid #334150; border-left:5px solid #526173; border-radius:8px; padding:9px; background:#0d131b; }
+  .assistant-item.good { border-left-color:var(--good); }
+  .assistant-item.check,.assistant-item.warning { border-left-color:var(--check); }
+  .assistant-item.poor { border-left-color:var(--poor); }
+  .matrix { width:100%; border-collapse:separate; border-spacing:5px; }
+  .matrix th,.matrix td { border:0; padding:3px; text-align:center; }
+  .matrix th:first-child,.matrix td:first-child { text-align:left; color:#d8dde4; width:76px; }
+  .cellset { display:flex; justify-content:center; gap:3px; }
+  .sigcell { width:13px; height:13px; border-radius:2px; border:1px solid #4a5564; background:#1f2933; }
+  .sigcell.good { background:#167a3f; border-color:#29a85c; }
+  .sigcell.warning { background:#a77a16; border-color:#d7a92f; }
+  .sigcell.poor { background:#9b2632; border-color:#e4565f; }
+  .sigcell.no_signal { background:#1f2933; opacity:.38; }
+  .sigcell.not_applicable { background:transparent; border-color:#3a424d; opacity:.28; }
+  .matrix-cell { display:flex; align-items:center; justify-content:center; gap:7px; min-height:22px; }
+  .matrix-count { min-width:30px; color:#aebdca; font-size:11px; text-align:left; }
+  .matrix-summary { margin:0 0 8px; border:1px solid #334150; border-left:4px solid #526173; border-radius:8px; padding:8px 10px; background:#0d131b; color:#d8dde4; }
+  .matrix-summary.good { border-left-color:var(--good); }
+  .matrix-summary.warning { border-left-color:var(--check); }
+  .matrix-summary.poor { border-left-color:var(--poor); }
+  .live-spectrum { height:270px; }
+  .spectrum-controls { display:grid; grid-template-columns:1.2fr .8fr .8fr auto; gap:8px; align-items:end; margin:8px 0; }
+  .spectrum-controls label { margin-top:0; }
+  .spectrum-controls button { margin-top:0; min-width:82px; }
+  .live-range-readout { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:0 0 8px; color:#cbd5e1; font-size:12px; }
+  .live-range-chip { border:1px solid #334150; border-radius:999px; padding:3px 8px; background:#101923; white-space:nowrap; }
+  .live-range-chip.focus { border-color:#59b7c9; color:#dff9ff; background:#0b2730; }
+  .live-range-chip.stale { border-color:#e4565f; color:#ffd1d6; background:#2b1117; }
+  @media(max-width:1100px){ .live-grid,.live-kpis{grid-template-columns:1fr} }
 </style>
   <link rel="stylesheet" href="/static/lantern_nav.css" />
-  <link rel="stylesheet" href="/static/platform_shell.css?v=0127" />
+  <link rel="stylesheet" href="/static/platform_shell.css?v=0134" />
 </head>
-<body>
+<body><script data-eei-shell-early src="/static/platform_shell.js?v=0134"></script>
 <header>
   <h1>MOTH Launch RF Analysis <span class="muted">v0.7.5 add-on</span></h1>
   <div class="muted">Purpose: identify cleaner time windows for authorised UAS operations using passive MOTH RF survey evidence. All chart time axes are <b>UTC</b>. For local time (UTC+3), add approximately +3 hours; verify operational time source before use.</div>
@@ -59,8 +103,8 @@
     <label>Collections / scan IDs, comma-separated</label>
     <input id="collectionIds" placeholder="blank = all scans" />
     <div class="grid">
-      <div><label>Start UTC</label><input id="startUtc" placeholder="2026-05-08T06:00:00Z" /></div>
-      <div><label>End UTC</label><input id="endUtc" placeholder="blank = latest" /></div>
+      <div><label>Start UTC</label><input id="startUtc" type="datetime-local" step="60" min="2020-01-01T00:00" max="2035-12-31T23:59" title="UTC date/time" /></div>
+      <div><label>End UTC</label><input id="endUtc" type="datetime-local" step="60" min="2020-01-01T00:00" max="2035-12-31T23:59" title="UTC date/time; leave blank for latest" /></div>
     </div>
     <div class="grid">
       <div><label>Graph bin minutes</label><input id="binMinutes" type="number" min="1" max="240" value="30" /></div>
@@ -105,6 +149,63 @@
     </div>
 
     <div class="panel">
+      <h2>Live MOTH spectrum / interference feed</h2>
+      <div class="muted">Live USB-C feed from the connected MOTH. This view includes RF measurements even when GPS is not fixed, so it is suitable for bench/live spectrum monitoring as well as field collection.</div>
+      <div class="live-kpis">
+        <div class="live-card"><b id="liveDevice">-</b><span>device / port</span></div>
+        <div class="live-card"><b id="livePeak">-</b><span>strongest live peak</span></div>
+        <div class="live-card"><b id="liveInterference">-</b><span>interference</span></div>
+        <div class="live-card"><b id="liveJamming">-</b><span>GNSS jamming</span></div>
+        <div class="live-card"><b id="liveSpoofing">-</b><span>possible spoofing</span></div>
+        <div class="live-card"><b id="liveSatellites">-</b><span>satellites visible</span></div>
+        <div class="live-card"><b id="liveGpsFix">-</b><span>GPS fix</span></div>
+      </div>
+      <div class="live-grid">
+        <div class="live-card">
+          <h3>Mitigation assistant</h3>
+          <div id="liveAssistant" class="assistant-list"><div class="muted">Waiting for live feed.</div></div>
+          <h3>Device / position</h3>
+          <div id="livePosition" class="status">Waiting for live position.</div>
+        </div>
+        <div class="live-card">
+          <h3>Spectrum viewer</h3>
+          <div class="spectrum-controls">
+            <div>
+              <label for="liveSpectrumPreset">Range preset</label>
+              <select id="liveSpectrumPreset" onchange="applyLiveSpectrumPreset()">
+                <option value="auto">Auto from live sample</option>
+                <option value="0,6000">Full 0-6000 MHz</option>
+                <option value="0,1000">0-1000 MHz</option>
+                <option value="1000,2000">1000-2000 MHz</option>
+                <option value="2000,4000">2000-4000 MHz</option>
+                <option value="4000,6000">4000-6000 MHz</option>
+                <option value="1150,1620">GNSS L5/L2/L1</option>
+                <option value="900,1700">L-band / GNSS context</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+            <div><label for="liveSpectrumMin">Min MHz</label><input id="liveSpectrumMin" type="number" min="0" max="6000" step="1" placeholder="auto" /></div>
+            <div><label for="liveSpectrumMax">Max MHz</label><input id="liveSpectrumMax" type="number" min="1" max="6000" step="1" placeholder="auto" /></div>
+            <button onclick="applyLiveSpectrumRange()">Apply</button>
+          </div>
+          <div id="liveSpectrumRange" class="live-range-readout"><span class="live-range-chip">Waiting for live range.</span></div>
+          <canvas id="liveSpectrumCanvas" class="live-spectrum"></canvas>
+          <div class="muted">Horizontal axis = fixed live spectrum range. Blue bars are live MOTH detections; amber trace is the peak envelope across all reported detections in the rolling sample.</div>
+        </div>
+      </div>
+      <div class="live-grid" style="margin-top:10px">
+        <div class="live-card">
+          <h3>Signal matrix</h3>
+          <div id="liveMatrix">Waiting for live matrix.</div>
+        </div>
+        <div class="live-card">
+          <h3>Top live peaks</h3>
+          <div id="livePeaks">Waiting for live peaks.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
       <h2>L1 / L2 / L5 over time</h2>
       <canvas id="gnssCanvas"></canvas>
       <div class="timekey"><b>Time axis key:</b> left-to-right = UTC time buckets. Tick labels show UTC time and approximate UTC+3 local time. Vertical scale = MOTH event count per bucket. Lower lines generally mean quieter GNSS-window activity.</div>
@@ -138,17 +239,27 @@
 <script>
 const api = location.origin;
 let lastGnss = null, lastSpectrum = null, lastWindows = null;
+function queryValue(field) {
+  const el = document.getElementById(field);
+  const v = el.value.trim();
+  if (!v) return '';
+  if (el.type === 'datetime-local') {
+    if (field === 'endUtc') return v.length === 16 ? `${v}:59Z` : `${v}Z`;
+    return v.length === 16 ? `${v}:00Z` : `${v}Z`;
+  }
+  return v;
+}
 function q(extra={}) {
   const p = new URLSearchParams();
   const ids = document.getElementById('collectionIds').value.trim();
   if (ids) p.set('collection_ids', ids);
   for (const [field, name] of [['startUtc','start_utc'],['endUtc','end_utc'],['candidateId','candidate_id'],['radiusM','radius_m'],['widthMhz','width_mhz'],['spikeDbm','spike_dbm'],['maxRows','max_rows']]) {
-    const v = document.getElementById(field).value.trim(); if (v) p.set(name, v);
+    const v = queryValue(field); if (v) p.set(name, v);
   }
   for (const [k,v] of Object.entries(extra)) if (v !== undefined && v !== null && v !== '') p.set(k, v);
   return p.toString();
 }
-function setStatus(s) { document.getElementById('status').textContent = s; }
+function setStatus(s) { document.getElementById('status').textContent = s; if (window.LanternProgress) window.LanternProgress.note(String(s).split('\\n')[0]); }
 async function getJson(url) { const r = await fetch(url); if (!r.ok) throw new Error(await r.text()); return r.json(); }
 function resizeCanvas(c) { const dpr = window.devicePixelRatio || 1; c.width = Math.floor(c.clientWidth*dpr); c.height = Math.floor(c.clientHeight*dpr); const ctx=c.getContext('2d'); ctx.scale(dpr,dpr); return [ctx,c.clientWidth,c.clientHeight]; }
 function dt(s) { const d = new Date(s); return Number.isFinite(d.getTime()) ? d : null; }
@@ -218,6 +329,242 @@ function table(rows, cols) {
   if (!rows.length) return '<div class="muted">None found.</div>';
   return '<table><tr>'+cols.map(c=>`<th>${c[0]}</th>`).join('')+'</tr>'+rows.map(r=>'<tr>'+cols.map(c=>`<td>${esc(r[c[1]])}</td>`).join('')+'</tr>').join('')+'</table>';
 }
+function fmt(x, suffix='') { return x === null || x === undefined || x === '' ? '-' : `${x}${suffix}`; }
+function severityClass(value) { return value === 'Detected' ? 'poor' : value === 'Possible' || value === 'No GNSS data' || value === 'Not calibrated' ? 'check' : 'good'; }
+function mhzLabel(v) { return `${Number(v).toFixed(Number(v) >= 100 ? 1 : 2)} MHz`; }
+function gpsFixLabel(value) {
+  const fix = Number(value);
+  if (!Number.isFinite(fix)) return 'No data';
+  if (fix <= 0) return 'No fix';
+  if (fix === 1) return 'No fix';
+  if (fix === 2) return '2D';
+  if (fix === 3) return '3D';
+  if (fix === 4) return 'DGPS';
+  if (fix === 5) return 'RTK float';
+  if (fix === 6) return 'RTK fixed';
+  return `Fix ${fix}`;
+}
+function messageTypeInfo(feed, type) {
+  return (feed.message_types || []).find(m => String(m.message_type || '').toUpperCase() === type);
+}
+let lastLiveFeed = null;
+let liveSpectrumRangeOverride = null;
+function clampLiveSpectrumRange(minMhz, maxMhz) {
+  let lo = Number(minMhz), hi = Number(maxMhz);
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+  lo = Math.max(0, Math.min(6000, lo));
+  hi = Math.max(1, Math.min(6000, hi));
+  if (hi <= lo) hi = Math.min(6000, lo + 1);
+  return { min:lo, max:hi };
+}
+function applyLiveSpectrumPreset() {
+  const preset = document.getElementById('liveSpectrumPreset')?.value || 'auto';
+  if (preset === 'auto') {
+    liveSpectrumRangeOverride = null;
+    document.getElementById('liveSpectrumMin').value = '';
+    document.getElementById('liveSpectrumMax').value = '';
+  } else if (preset !== 'custom') {
+    const [lo, hi] = preset.split(',').map(Number);
+    liveSpectrumRangeOverride = clampLiveSpectrumRange(lo, hi);
+    document.getElementById('liveSpectrumMin').value = liveSpectrumRangeOverride.min;
+    document.getElementById('liveSpectrumMax').value = liveSpectrumRangeOverride.max;
+  }
+  if (lastLiveFeed) drawLiveSpectrum(lastLiveFeed);
+}
+function applyLiveSpectrumRange() {
+  const range = clampLiveSpectrumRange(document.getElementById('liveSpectrumMin').value, document.getElementById('liveSpectrumMax').value);
+  liveSpectrumRangeOverride = range;
+  const preset = document.getElementById('liveSpectrumPreset');
+  if (preset) preset.value = range ? 'custom' : 'auto';
+  if (lastLiveFeed) drawLiveSpectrum(lastLiveFeed);
+}
+function liveSpectrumBands(points) {
+  const pts = points
+    .map(p => ({...p, freq_mhz:Number(p.freq_mhz), max_dbm:Number(p.max_dbm)}))
+    .filter(p => Number.isFinite(p.freq_mhz) && Number.isFinite(p.max_dbm))
+    .sort((a,b) => a.freq_mhz - b.freq_mhz);
+  if (!pts.length) return [];
+  const fullSpan = pts[pts.length-1].freq_mhz - pts[0].freq_mhz;
+  const gapMhz = Math.max(8, Math.min(80, fullSpan * 0.04));
+  const bands = [];
+  let current = { min:pts[0].freq_mhz, max:pts[0].freq_mhz, points:[pts[0]], maxDbm:pts[0].max_dbm };
+  for (let i=1; i<pts.length; i++) {
+    const p = pts[i], prev = pts[i-1];
+    if (p.freq_mhz - prev.freq_mhz > gapMhz) {
+      bands.push(current);
+      current = { min:p.freq_mhz, max:p.freq_mhz, points:[p], maxDbm:p.max_dbm };
+    } else {
+      current.max = p.freq_mhz;
+      current.points.push(p);
+      current.maxDbm = Math.max(current.maxDbm, p.max_dbm);
+    }
+  }
+  bands.push(current);
+  return bands;
+}
+function drawLiveSpectrum(feed) {
+  const c = document.getElementById('liveSpectrumCanvas'); if (!c) return;
+  const [ctx,w,h] = resizeCanvas(c); const pad=42;
+  const maxLiveSpectrumMhz = 6000;
+  const rawPts = feed.spectrum || [];
+  const pts = rawPts
+    .map(p => ({...p, freq_mhz:Number(p.freq_mhz), max_dbm:Number(p.max_dbm)}))
+    .filter(p => Number.isFinite(p.freq_mhz) && Number.isFinite(p.max_dbm) && p.freq_mhz <= maxLiveSpectrumMhz)
+    .sort((a,b) => a.freq_mhz - b.freq_mhz);
+  const rangeEl = document.getElementById('liveSpectrumRange');
+  ctx.clearRect(0,0,w,h); ctx.fillStyle='#08090b'; ctx.fillRect(0,0,w,h);
+  ctx.strokeStyle='#3a4654'; ctx.beginPath(); ctx.moveTo(pad,12); ctx.lineTo(pad,h-pad); ctx.lineTo(w-10,h-pad); ctx.stroke();
+  if (!pts.length) {
+    if (rangeEl) rangeEl.innerHTML = '<span class="live-range-chip stale">No live RF range in the current sample</span>';
+    ctx.fillStyle='#d8dde4'; ctx.font='13px system-ui'; ctx.fillText('No live RF measurements in current sample.', 18, 34); return;
+  }
+  const bands = liveSpectrumBands(pts);
+  const fullMinF = pts[0].freq_mhz;
+  const fullMaxF = pts[pts.length-1].freq_mhz;
+  const span = fullMaxF - fullMinF;
+  const autoStep = span > 3000 ? 1000 : span > 1500 ? 500 : span > 500 ? 250 : 100;
+  const minF = liveSpectrumRangeOverride ? liveSpectrumRangeOverride.min : Math.max(0, Math.floor(fullMinF / autoStep) * autoStep);
+  const maxF = liveSpectrumRangeOverride ? liveSpectrumRangeOverride.max : Math.min(maxLiveSpectrumMhz, Math.max(minF + autoStep, Math.ceil(fullMaxF / autoStep) * autoStep));
+  const viewSpan = maxF - minF;
+  const step = viewSpan > 3000 ? 1000 : viewSpan > 1500 ? 500 : viewSpan > 500 ? 250 : viewSpan > 200 ? 100 : 50;
+  const inViewCount = pts.filter(p => p.freq_mhz >= minF && p.freq_mhz <= maxF).length;
+  const cappedCount = rawPts.length - pts.length;
+  if (rangeEl) {
+    const activeRanges = bands.slice(0,4).map(b => `${mhzLabel(b.min)}-${mhzLabel(b.max)}`).join(' | ');
+    const hidden = bands.length > 4 ? ` +${bands.length - 4} more` : '';
+    const stale = feed.active ? '' : `<span class="live-range-chip stale">stale ${fmt(feed.feed_age_seconds,'s old')}</span>`;
+    rangeEl.innerHTML =
+      `${stale}<span class="live-range-chip focus">fixed view ${mhzLabel(minF)}-${mhzLabel(maxF)}</span>`+
+      `<span class="live-range-chip">reported sample ${mhzLabel(fullMinF)}-${mhzLabel(fullMaxF)}</span>`+
+      `<span class="live-range-chip">${inViewCount} detections in view</span>`+
+      `<span class="live-range-chip">active ranges ${esc(activeRanges + hidden)}</span>`+
+      (cappedCount > 0 ? `<span class="live-range-chip stale">${cappedCount} detections above 6 GHz hidden</span>` : '');
+  }
+  const minDbm = -120;
+  const maxDbm = Math.max(-40, ...pts.map(p=>p.max_dbm));
+  const x = f => pad + ((Number(f)-minF)/Math.max(maxF-minF,1))*(w-pad-16);
+  const y = d => h-pad - ((Number(d)-minDbm)/Math.max(maxDbm-minDbm,1))*(h-pad-24);
+  for (let tick = minF; tick <= maxF; tick += step) {
+    const tx = x(tick);
+    ctx.strokeStyle = tick === minF ? '#3a4654' : 'rgba(58,70,84,.42)';
+    ctx.beginPath(); ctx.moveTo(tx,12); ctx.lineTo(tx,h-pad); ctx.stroke();
+    ctx.fillStyle='#8fa4b8'; ctx.font='10px system-ui'; ctx.fillText(String(tick), tx+3, h-24);
+  }
+  ctx.fillStyle='rgba(89,183,201,.72)';
+  pts.forEach(p => {
+    const px=x(p.freq_mhz), py=y(p.max_dbm);
+    const barW = Math.max(1, Math.min(4, (w-pad-16) / Math.max(pts.length, 120)));
+    const alpha = Math.max(.32, Math.min(1, (p.max_dbm + 120) / 70));
+    ctx.fillStyle=`rgba(89,183,201,${alpha.toFixed(2)})`;
+    ctx.fillRect(px, py, barW, Math.max(2, h-pad-py));
+  });
+  const envelopeBins = Math.max(60, Math.min(260, Math.floor((w-pad-16) / 5)));
+  const envelope = Array.from({length: envelopeBins}, () => ({freqSum:0, count:0, maxDbm:null}));
+  pts.forEach(p => {
+    const idx = Math.max(0, Math.min(envelopeBins - 1, Math.floor(((p.freq_mhz - minF) / Math.max(maxF - minF, 1)) * envelopeBins)));
+    const b = envelope[idx];
+    b.freqSum += p.freq_mhz;
+    b.count += 1;
+    b.maxDbm = b.maxDbm === null ? p.max_dbm : Math.max(b.maxDbm, p.max_dbm);
+  });
+  ctx.strokeStyle='#ffd166'; ctx.lineWidth=2.2; ctx.beginPath();
+  let startedEnvelope = false;
+  envelope.forEach((b, i) => {
+    if (!b.count || b.maxDbm === null) {
+      startedEnvelope = false;
+      return;
+    }
+    const freq = b.freqSum / b.count;
+    const px = x(freq), py = y(b.maxDbm);
+    if (!startedEnvelope) { ctx.moveTo(px, py); startedEnvelope = true; }
+    else ctx.lineTo(px, py);
+  });
+  ctx.stroke();
+  for (const marker of [{f:1176.45,t:'L5'},{f:1227.6,t:'L2'},{f:1575.42,t:'L1'}]) {
+    if (marker.f < minF || marker.f > maxF) continue;
+    const mx=x(marker.f); ctx.strokeStyle='rgba(215,169,47,.65)'; ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(mx,12); ctx.lineTo(mx,h-pad); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle='#ffd166'; ctx.font='11px system-ui'; ctx.fillText(marker.t, mx+4, 26);
+  }
+  const peak = feed.detection?.peak;
+  if (peak && Number(peak.freq_mhz) >= minF && Number(peak.freq_mhz) <= maxF) { ctx.fillStyle='#ff6b6b'; ctx.beginPath(); ctx.arc(x(peak.freq_mhz), y(peak.max_dbm), 4, 0, Math.PI*2); ctx.fill(); }
+  ctx.fillStyle='#cbd5e1'; ctx.font='11px system-ui';
+  ctx.fillText(mhzLabel(minF), pad, h-12); ctx.fillText(mhzLabel(maxF), Math.max(pad,w-96), h-12);
+  ctx.fillText(`${maxDbm.toFixed(0)} dBm`, 5, 22); ctx.fillText(`${minDbm.toFixed(0)} dBm`, 5, h-pad);
+}
+function renderLiveMatrix(rows) {
+  const bands = ['L5','L2','L1'];
+  const cells = (rows || []).flatMap(r => r.cells || []);
+  const active = cells.filter(c => c.status !== 'not_applicable' && Number(c.count || 0) > 0);
+  const poor = active.filter(c => c.status === 'poor').length;
+  const warning = active.filter(c => c.status === 'warning').length;
+  const summaryClass = poor ? 'poor' : warning ? 'warning' : 'good';
+  const summaryText = active.length
+    ? `${active.length} GNSS-band detection cell${active.length === 1 ? '' : 's'} in the current live sample.`
+    : 'No live detections in GNSS L5/L2/L1 windows in the current rolling sample.';
+  const summary = `<div class="matrix-summary ${summaryClass}"><b>GNSS-band status:</b> ${esc(summaryText)}</div>`;
+  const head = '<table class="matrix"><tr><th></th>'+bands.map(b=>`<th>${b} Band</th>`).join('')+'</tr>';
+  const body = (rows||[]).map(r => `<tr><td>${esc(r.constellation)}</td>` + (r.cells||[]).map(cell => {
+    const count = Number(cell.count || 0);
+    const dbm = cell.max_dbm === null || cell.max_dbm === undefined ? '' : `${Number(cell.max_dbm).toFixed(0)} dBm`;
+    const title = `${cell.band} ${cell.center_mhz ? cell.center_mhz+' MHz' : ''} ${count ? `${count} detections ${dbm}` : 'no detections'}`;
+    const countLabel = cell.status === 'not_applicable' ? 'n/a' : count ? `${count}` : '0';
+    return `<td><div class="matrix-cell" title="${esc(title)}"><div class="cellset"><span class="sigcell ${esc(cell.status)}"></span><span class="sigcell ${esc(cell.status)}"></span><span class="sigcell ${esc(cell.status)}"></span></div><span class="matrix-count">${esc(countLabel)}</span></div></td>`;
+  }).join('') + '</tr>').join('');
+  const legend = '<div class="muted">Numbers are live detections in each GNSS band window. 0 means no detection reported in the rolling sample; n/a means that constellation does not use that band in this view.</div>';
+  return summary + head + body + '</table>' + legend;
+}
+function renderLiveFeed(feed) {
+  if (!feed || !feed.ok) return;
+  lastLiveFeed = feed;
+  const peak = feed.detection?.peak;
+  document.getElementById('liveDevice').textContent = `${feed.device?.source_port || '-'} ${feed.active ? 'LIVE' : 'STALE'}`;
+  document.getElementById('livePeak').textContent = peak ? `${Number(peak.freq_mhz).toFixed(1)} MHz` : '-';
+  document.getElementById('liveInterference').innerHTML = `<span class="live-status ${severityClass(feed.detection?.interference)}">${esc(feed.detection?.interference || '-')}</span>`;
+  document.getElementById('liveJamming').innerHTML = `<span class="live-status ${severityClass(feed.detection?.jamming)}">${esc(feed.detection?.jamming || '-')}</span>`;
+  document.getElementById('liveSpoofing').innerHTML = `<span class="live-status ${severityClass(feed.detection?.spoofing)}">${esc(feed.detection?.spoofing || '-')}</span>`;
+  document.getElementById('liveAssistant').innerHTML = (feed.assistant||[]).map(a => `<div class="assistant-item ${esc(a.severity)}"><b>${esc(a.title)}</b><div class="muted">${esc(a.action)}</div></div>`).join('');
+  const p = feed.position || {}, h = feed.health || {};
+  const gpsInfo = messageTypeInfo(feed, 'GPS_RAW_INT');
+  const gpsFix = gpsFixLabel(p.gps_fix_type);
+  document.getElementById('liveSatellites').innerHTML = `<span class="live-status ${(Number(p.satellites_seen)||0) > 0 ? 'good' : 'check'}">${esc(fmt(p.satellites_seen))}</span>`;
+  document.getElementById('liveGpsFix').innerHTML = `<span class="live-status ${gpsFix === 'No fix' || gpsFix === 'No data' ? 'check' : 'good'}">${esc(gpsFix)}</span>`;
+  document.getElementById('livePosition').textContent =
+    `Last message: ${feed.device?.last_message_utc || '-'} (${fmt(feed.feed_age_seconds,'s old')})\n`+
+    `GNSS packet: ${gpsInfo ? `${gpsInfo.count} GPS_RAW_INT, last ${gpsInfo.last_utc}` : 'none received in this session'}\n`+
+    `Fix: ${gpsFix} (raw ${fmt(p.gps_fix_type)}); satellites visible: ${fmt(p.satellites_seen)}\n`+
+    `Lat/Lon: ${fmt(p.lat)} / ${fmt(p.lon)}\nAltitude MSL: ${fmt(p.altitude_msl_m,' m')}\n`+
+    `RF events: ${fmt(h.rf_event_count)}; raw messages: ${fmt(h.message_count)}; battery: ${fmt(h.battery_remaining,'%')}`;
+  document.getElementById('liveMatrix').innerHTML = renderLiveMatrix(feed.signal_matrix || []);
+  document.getElementById('livePeaks').innerHTML = table((feed.top_peaks||[]).slice(0,8), [['MHz','freq_mhz'],['Max dBm','max_dbm'],['Count','count'],['Latest UTC','latest_utc']]);
+  drawLiveSpectrum(feed);
+}
+let liveFeedBusy = false;
+async function loadLiveFeed() {
+  if (liveFeedBusy) return;
+  liveFeedBusy = true;
+  try {
+    const feed = await getJson(`${api}/api/sensors/live-feed?seconds=60&limit=5000`);
+    renderLiveFeed(feed);
+  } catch (err) {
+    const el = document.getElementById('liveAssistant');
+    if (el) el.innerHTML = `<div class="error">Live feed unavailable: ${esc(err.message || err)}</div>`;
+  } finally {
+    liveFeedBusy = false;
+  }
+}
+function anomalyFilterNotice(data, label='Analysis filter') {
+  const filter = data?.time_filter || {};
+  const excluded = Number(data?.excluded_time_anomaly_count || filter.excluded_time_anomaly_count || 0);
+  if (filter.mode === 'sane_default' && (excluded > 0 || filter.date_sanity_filter_applied)) {
+    const range = filter.min_utc && filter.max_utc ? `${filter.min_utc} -> ${filter.max_utc}` : 'the mission-time range';
+    const countText = excluded > 0 ? `${excluded} anomalous timestamp event${excluded === 1 ? '' : 's'} excluded` : 'Date sanity filter active';
+    return `${label}: ${countText} outside ${range}. Use the Start UTC and End UTC date pickers on the left to inspect a deliberate period.`;
+  }
+  if (Number(data?.time_anomaly_count || filter.time_anomaly_count || 0) > 0) {
+    return `${label}: anomalous timestamp rows are included because diagnostic mode is active.`;
+  }
+  return '';
+}
 function updateAnalystSummary() {
   const best = lastWindows?.best_viable_window || lastWindows?.windows?.[0];
   const brief = lastWindows?.operator_brief;
@@ -235,6 +582,8 @@ function updateAnalystSummary() {
   } else {
     lines.push('No launch timing can be assessed for the current filters. Broaden the time/frequency filters or load more MOTH data.');
   }
+  const launchFilterNotice = anomalyFilterNotice(lastWindows, 'Launch-window filter');
+  if (launchFilterNotice) lines.push(launchFilterNotice);
   if (spikes.length) lines.push(`Top RF spike period: ${spikes[0].bucket_start_utc}, ${spikes[0].freq_bin_mhz} MHz, max ${spikes[0].max_dbm} dBm.`);
   lines.push('AI note: current text is deterministic and traceable. AI HAT+ 2 can later rewrite this metric bundle into a richer short operator brief without changing the score.');
   document.getElementById('analystSummary').textContent = lines.filter(Boolean).join('\\n');
@@ -242,33 +591,55 @@ function updateAnalystSummary() {
 
 async function loadGnssTimeline() {
   try {
+    const progress = window.LanternProgress;
+    if (progress) progress.begin('Loading GNSS timeline', 8);
     setStatus('Loading L1/L2/L5 timeline...');
-    const data = await getJson(`${api}/api/advanced/gnss-timeline?${q({bin_minutes:document.getElementById('binMinutes').value})}`);
+    if (progress) progress.update(32, 'Requesting GNSS timeline');
+    const data = await getJson(`${api}/api/advanced/gnss-timeline?${q({bin_minutes:document.getElementById('binMinutes').value, include_time_anomalies:false})}`);
     lastGnss = data;
+    if (progress) progress.update(72, 'Drawing GNSS timeline');
     drawLineChart('gnssCanvas', data.points || [], ['L1_event_count','L2_event_count','L5_event_count'], ['#63b3ff','#ffd166','#7CFC8A']);
+    const filter = data.time_filter || {};
+    const excluded = Number(data.excluded_time_anomaly_count || filter.excluded_time_anomaly_count || 0);
+    const filterRange = filter.min_utc && filter.max_utc ? `${filter.min_utc} -> ${filter.max_utc}` : 'the mission-time window';
+    const anomalyLine = filter.mode === 'sane_default'
+      ? `Timeline filter: ${excluded} anomalous timestamp event${excluded === 1 ? '' : 's'} excluded outside ${filterRange}.`
+      : 'Timeline filter: all timestamps included, including anomalies.';
     document.getElementById('gnssSummary').textContent = `Buckets: ${(data.points||[]).length}
 Bucket size: ${document.getElementById('binMinutes').value} minutes
 GNSS window width: ${data.width_mhz} MHz
 Time axis: UTC labels; second line is approximate UTC+3 local time.
 Data span: ${data.first_timestamp_utc || ''} -> ${data.last_timestamp_utc || ''}
+${anomalyLine}
 Interpretation: lower event counts are cleaner GNSS-window conditions, subject to MOTH event-log limitations.`;
-    setStatus('L1/L2/L5 timeline loaded.'); updateAnalystSummary();
+    setStatus('L1/L2/L5 timeline loaded.');
+    if (progress) progress.done('GNSS timeline loaded');
+    updateAnalystSummary();
   } catch (err) {
     setStatus('L1/L2/L5 timeline failed: ' + (err.message || err));
+    if (window.LanternProgress) window.LanternProgress.error('GNSS timeline failed');
     document.getElementById('gnssSummary').textContent = 'Timeline failed. Try fewer scans, a time range, larger bin minutes, or lower max rows.';
   }
 }
 async function loadSpectrum() {
   try {
+    const progress = window.LanternProgress;
+    if (progress) progress.begin('Loading spectrum view', 8);
     setStatus('Loading spectrum / abnormal-spike analysis. This is the heaviest view; use 30-60 minute bins and 10 MHz frequency bins for speed.');
+    if (progress) progress.update(28, 'Requesting spectrum bins');
     const data = await getJson(`${api}/api/advanced/spectrum-analysis?${q({time_bin_minutes:document.getElementById('binMinutes').value, freq_bin_mhz:document.getElementById('spectrumBinMhz').value})}`);
-    lastSpectrum = data; drawSpectrum(data);
+    lastSpectrum = data;
+    if (progress) progress.update(70, 'Drawing spectrum');
+    drawSpectrum(data);
     document.getElementById('anomalies').innerHTML = table((data.anomalies||[]).slice(0,8), [['UTC time','bucket_start_utc'],['MHz','freq_bin_mhz'],['Score','anomaly_score_0_100'],['Max dBm','max_dbm']]);
     document.getElementById('busyFreqs').innerHTML = table((data.frequency_summary||[]).slice(0,8), [['MHz','freq_bin_mhz'],['Events','event_count'],['Max dBm','max_dbm'],['Spikes','spike_count']]);
     document.getElementById('patterns').innerHTML = table((data.patterns_of_life_hourly||[]).filter(x=>x.event_count>0).slice(0,12), [['UTC hr','hour_utc'],['Events','event_count'],['Label','pattern_label']]);
-    setStatus('Spectrum / pattern analysis loaded.'); updateAnalystSummary();
+    setStatus('Spectrum / pattern analysis loaded.');
+    if (progress) progress.done('Spectrum loaded');
+    updateAnalystSummary();
   } catch (err) {
     setStatus('Spectrum analysis failed or timed out: ' + (err.message || err));
+    if (window.LanternProgress) window.LanternProgress.error('Spectrum failed');
     document.getElementById('anomalies').innerHTML = '<div class="muted">Spectrum failed. Try 60 minute bins, 20 MHz bins, selected scans, or a narrower start/end time.</div>';
   }
 }
@@ -286,27 +657,42 @@ function renderWindowCards(windows) {
 
 async function loadLaunchWindows() {
   try {
+    const progress = window.LanternProgress;
+    if (progress) progress.begin('Ranking launch windows', 8);
     setStatus('Ranking launch windows. This runs before the heavy spectrum view so the recommendation appears sooner.');
     const extra = {duration_minutes:document.getElementById('durationMinutes').value, step_minutes:document.getElementById('stepMinutes').value};
     const cmin=document.getElementById('connMinHz').value.trim(), cmax=document.getElementById('connMaxHz').value.trim(); if (cmin&&cmax) { extra.connectivity_min_hz=cmin; extra.connectivity_max_hz=cmax; }
+    extra.include_time_anomalies = false;
+    if (progress) progress.update(30, 'Requesting launch windows');
     const data = await getJson(`${api}/api/advanced/launch-windows?${q(extra)}`);
     lastWindows = data;
+    if (progress) progress.update(74, 'Rendering recommendation');
     const top = (data.windows||[]).slice(0, Number(document.getElementById('topN').value||10));
     const best = data.recommended_window || data.best_viable_window || top[0];
-    document.getElementById('recommendation').textContent = readoutForWindow(best);
+    const filterNotice = anomalyFilterNotice(data, 'Launch-window filter');
+    document.getElementById('recommendation').textContent = [readoutForWindow(best), filterNotice].filter(Boolean).join('\n');
     renderWindowCards(top);
     const bestLine = best ? `<div class="status"><b>Displayed recommendation:</b> ${esc(best.recommendation_type || 'BEST VIABLE')} - ${esc(best.start_utc)} to ${esc(best.end_utc)} - score ${esc(best.score_0_100)}/100<br><b>Where to look:</b> this card is the recommended timing. If no RECOMMENDED period exists, it is the BEST VIABLE or LEAST-BUSY observed timing.</div>` : '';
-    document.getElementById('launchWindows').innerHTML = bestLine + `<div class="muted"><b>Definition:</b> ${esc(data.definition || '')}<br><b>Limitations:</b> ${(data.limitations||[]).map(esc).join(' ')}</div>` + table(top, [['Start UTC','start_utc'],['End UTC','end_utc'],['Type','recommendation_type'],['Score','score_0_100'],['Readout','interpretation'],['GNSS events','gnss_event_count'],['Spikes','gnss_spike_count'],['Conn events','connectivity_event_count']]);
-    setStatus('Launch windows ranked. The top recommendation panel is now populated.'); updateAnalystSummary();
+    const filterNoticeHtml = filterNotice ? `<div class="status"><b>Timestamp filter:</b> ${esc(filterNotice)}</div>` : '';
+    document.getElementById('launchWindows').innerHTML = bestLine + filterNoticeHtml + `<div class="muted"><b>Definition:</b> ${esc(data.definition || '')}<br><b>Limitations:</b> ${(data.limitations||[]).map(esc).join(' ')}</div>` + table(top, [['Start UTC','start_utc'],['End UTC','end_utc'],['Type','recommendation_type'],['Score','score_0_100'],['Readout','interpretation'],['GNSS events','gnss_event_count'],['Spikes','gnss_spike_count'],['Conn events','connectivity_event_count']]);
+    setStatus('Launch windows ranked. The top recommendation panel is now populated.');
+    if (progress) progress.done('Launch windows loaded');
+    updateAnalystSummary();
   } catch (err) {
     setStatus('Launch-window ranking failed: ' + (err.message || err));
+    if (window.LanternProgress) window.LanternProgress.error('Launch-window ranking failed');
     document.getElementById('recommendation').textContent = 'Launch-window ranking failed. Try fewer scans, a start/end time range, a larger step, or lower max rows.';
   }
 }
 async function runAll() {
+  const progress = window.LanternProgress;
+  if (progress) progress.begin('Running all RF analysis', 5);
   await loadLaunchWindows();
+  if (progress) progress.update(36, 'Launch windows complete');
   await loadGnssTimeline();
+  if (progress) progress.update(68, 'GNSS timeline complete');
   await loadSpectrum();
+  if (progress) progress.done('All RF analysis loaded');
 }
 async function updateSourceLocationButton() {
   try {
@@ -325,8 +711,10 @@ async function updateSourceLocationButton() {
 }
 document.addEventListener('click', e => { const b=e.target.closest&&e.target.closest('button'); if(b) b.blur(); }, true);
 updateSourceLocationButton();
+loadLiveFeed();
+setInterval(loadLiveFeed, 1000);
 </script>
   <script src="/static/lantern_nav.js"></script>
-  <script src="/static/platform_shell.js?v=0127" defer></script>
+  <script src="/static/platform_shell.js?v=0134" defer></script>
 </body>
 </html>

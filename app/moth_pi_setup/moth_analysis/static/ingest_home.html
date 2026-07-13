@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LANTERN Ingest</title>
+  <link rel="stylesheet" href="/static/platform_shell.css?v=0134" />
+  <style>
+    :root{--bg:#02050a;--panel:#0b121d;--line:#374c62;--text:#f4f7fb;--muted:#a7b4c3;--cobalt:#2c89d1;--green:#33d17a;--amber:#d7a92f}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% -10%,rgba(44,137,209,.18),transparent 36%),linear-gradient(135deg,rgba(255,255,255,.018) 0 1px,transparent 1px 9px),var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif;line-height:1.42}.hero{padding:28px 24px 18px;background:linear-gradient(180deg,#0c1521,#05080d);border-bottom:1px solid var(--line)}.wrap{max-width:1420px;margin:0 auto;padding:18px 24px}.hero .wrap{padding:0 24px}h1{margin:0;font-size:30px;letter-spacing:.08em;text-transform:uppercase}h2{font-size:18px;margin:0 0 10px}.sub,.small,.muted{color:var(--muted)}.sub{font-size:14px;margin-top:8px;max-width:980px}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}.card{grid-column:span 4;background:linear-gradient(180deg,#0b121d,#05090f);border:1px solid var(--line);border-radius:8px;padding:15px;box-shadow:0 12px 30px rgba(0,0,0,.35)}.span-12{grid-column:span 12}.span-6{grid-column:span 6}.span-4{grid-column:span 4}@media(max-width:1000px){.card,.span-6,.span-4{grid-column:span 12}}.btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid #4b6d8b;background:linear-gradient(180deg,#1a4d78,#0e253c);color:#fff;text-decoration:none;border-radius:7px;padding:9px 11px;font-size:13px;font-weight:900}.btn.secondary{background:linear-gradient(180deg,#151f2d,#0b121d);border-color:#405166}.btn.good{background:linear-gradient(180deg,#19704a,#0d3524);border-color:#2b7450}.btn.warn{background:linear-gradient(180deg,#705916,#2f270e);border-color:#89702a}.kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.kpi .box{background:#050c15;border:1px solid var(--line);border-radius:8px;padding:10px}.kpi b{display:block;font-size:20px}.kpi span{font-size:11px;color:var(--muted)}.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.step{background:#050c15;border:1px solid #405166;border-radius:8px;padding:12px;min-height:88px}.step b{display:block}.step span{display:block;color:var(--muted);font-size:12px;margin-top:4px}.stack{display:flex;flex-direction:column;gap:8px}.stack a{display:block;text-decoration:none;color:#fff;background:#050c15;border:1px solid var(--line);border-radius:8px;padding:10px}.stack a:hover{background:#0f3155;border-color:#2c89d1}.tag{display:inline-flex;border:1px solid #405166;border-radius:999px;padding:3px 7px;font-size:11px;color:#dcecff;margin:2px;background:#050c15}.tag.good{border-color:#24744b}.tag.warn{border-color:#89702a}@media(max-width:900px){.kpi{grid-template-columns:repeat(2,1fr)}.flow{grid-template-columns:1fr}}@media print{#eei-app-shell,.btnrow{display:none!important}body{background:#fff;color:#111}.hero,.card{box-shadow:none;background:#fff;color:#111}.sub,.small,.muted{color:#333}}
+  </style>
+</head>
+<body data-nav-group="ingest"><script data-eei-shell-early src="/static/platform_shell.js?v=0134"></script>
+  <section class="hero"><div class="wrap"><h1>Ingest</h1><div class="sub">Acquisition, upload, raw-message capture and provenance. Analysis pages consume validated collections.</div></div></section>
+  <main class="wrap">
+    <section class="grid">
+      <div class="card span-12">
+        <h2>Ingest status</h2>
+        <div class="kpi"><div class="box"><b id="collections">-</b><span>collections loaded</span></div><div class="box"><b id="events">-</b><span>events in database</span></div><div class="box"><b id="sessions">-</b><span>sensor sessions</span></div><div class="box"><b id="raw">-</b><span>raw sensor messages</span></div></div>
+        <div class="btnrow"><a class="btn good" href="/ingest/upload?v=0122">Data Upload</a><a class="btn secondary" href="/ingest/live-sensors?v=0122">Live Sensors</a><a class="btn secondary" href="/ingest/import-diagnostics?v=0122">Import Diagnostics</a><a class="btn secondary" href="/context?v=0122">Mission Context</a></div>
+      </div>
+      <div class="card span-12"><h2>Clean workflow</h2><div class="flow"><div class="step"><b>1. Acquire</b><span>Select CSV upload, live sensor mode, or future map/elevation data.</span></div><div class="step"><b>2. Preserve</b><span>Archive source files, raw messages and provenance before normalisation.</span></div><div class="step"><b>3. Validate</b><span>Use parser diagnostics and data quality before analysis.</span></div><div class="step"><b>4. Analyse</b><span>Engineering and Reporting consume ready collections.</span></div></div></div>
+      <div class="card span-4"><h2>Data Upload</h2><p class="small">Historic CSV ingest stays available here, away from the candidate map.</p><div class="stack"><a href="/ingest/upload?v=0122"><b>Open upload tool</b><br><span class="muted">Select one or more CSV files and attach collection metadata.</span></a></div></div>
+      <div class="card span-4"><h2>Live Data</h2><p><span class="tag good">MOTH SDK</span><span class="tag warn">RF Explorer future</span></p><div class="stack"><a href="/ingest/live-sensors?v=0122"><b>Open live sensors</b><br><span class="muted">Review sessions, raw messages, normalised RF events and GPS state.</span></a></div></div>
+      <div class="card span-4"><h2>Diagnostics</h2><p class="small">Parser and quality checks live beside ingest, before RF/map analysis.</p><div class="stack"><a href="/ingest/import-diagnostics?v=0122"><b>Open diagnostics</b><br><span class="muted">CSV parser status, quality mode, source file notes and troubleshooting.</span></a></div></div>
+      <div class="card span-12"><h2>Boundary</h2><p class="small">Ingest owns transport, file upload, raw payloads, parser diagnostics and collection provenance. Analysis pages own RF interpretation, map layers, candidate evidence and reporting.</p></div>
+    </section>
+  </main>
+  <script>
+    const $ = id => document.getElementById(id);
+    async function getJson(url){const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw new Error(url+' '+r.status);return r.json();}
+    (async function(){try{const [health,sensors]=await Promise.all([getJson('/api/platform/health'),getJson('/api/sensors/status').catch(()=>({}))]);const db=health.database||{};$('collections').textContent=db.collection_count??'-';$('events').textContent=db.total_event_count??db.valid_event_count??'-';$('sessions').textContent=sensors.session_count??'-';$('raw').textContent=sensors.raw_message_count??'-';}catch(e){}})();
+  </script>
+  <script src="/static/platform_shell.js?v=0134" defer></script>
+</body>
+</html>

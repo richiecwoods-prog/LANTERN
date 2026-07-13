@@ -23,6 +23,13 @@ from .h3tools import cell_to_boundary_lnglat, latlon_to_cell
 from .ingest import insert_candidate_site, insert_collection_from_csv
 from .scoring import percentile, score_candidate_sites
 from .source_location import SourceLocationConfig, build_source_location_result
+from .sensor_ingest import (
+    ingest_sensor_message,
+    list_sensor_sessions,
+    sensor_capabilities,
+    sensor_status,
+    start_sensor_session,
+)
 from .quality import (
     get_latest_quality_summary,
     load_and_clean_csv,
@@ -44,6 +51,31 @@ class CandidateIn(BaseModel):
     site_notes: str | None = None
 
 
+class SensorSessionIn(BaseModel):
+    sensor_kind: str = "moth_sdk"
+    session_uuid: str | None = None
+    collection_name: str | None = None
+    transport: str | None = None
+    device_serial: str | None = None
+    firmware_version: str | None = None
+    hardware_version: str | None = None
+    sdk_version: str | None = None
+    source_port: str | None = None
+    baud_rate: int | None = None
+    notes: str | None = None
+
+
+class SensorMessageIn(BaseModel):
+    session_uuid: str
+    sensor_kind: str = "moth_sdk"
+    payload: dict[str, Any]
+
+
+class SensorMessageBatchIn(BaseModel):
+    session_uuid: str
+    sensor_kind: str = "moth_sdk"
+    payloads: list[dict[str, Any]]
+
 class MissionContextIn(BaseModel):
     aoi: str | None = None
     lat: float | None = Field(default=None, ge=-90, le=90)
@@ -56,6 +88,313 @@ def startup() -> None:
     init_db()
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+@app.get("/api/sensors/capabilities")
+def api_sensor_capabilities() -> dict[str, Any]:
+    return sensor_capabilities()
+
+
+@app.get("/api/sensors/status")
+def api_sensor_status() -> dict[str, Any]:
+    return sensor_status(db_path=DB_PATH)
+
+
+@app.get("/api/sensors/sessions")
+def api_sensor_sessions(limit: int = Query(default=20, ge=1, le=200)) -> list[dict[str, Any]]:
+    return list_sensor_sessions(limit=limit, db_path=DB_PATH)
+
+
+def _live_feed_parse_utc(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+_LIVE_GNSS_MATRIX = [
+    ("GPS", {"L5": 1176.45, "L2": 1227.60, "L1": 1575.42}),
+    ("GLO", {"L2": 1246.0, "L1": 1602.0}),
+    ("GAL", {"L5": 1176.45, "L2": 1207.14, "L1": 1575.42}),
+    ("BDS", {"L5": 1176.45, "L2": 1207.14, "L1": 1561.10}),
+    ("QZSS", {"L5": 1176.45, "L2": 1227.60, "L1": 1575.42}),
+    ("NAVIC", {"L5": 1176.45, "L1": 1176.45}),
+    ("LBAND", {"L1": 1545.0}),
+    ("SBAS", {"L5": 1176.45, "L1": 1575.42}),
+]
+
+
+def _live_feed_level(max_dbm: float | None, count: int = 0) -> str:
+    if max_dbm is None or count <= 0:
+        return "no_signal"
+    if max_dbm >= -65:
+        return "poor"
+    if max_dbm >= -82:
+        return "warning"
+    return "good"
+
+
+@app.get("/api/sensors/live-feed")
+def api_sensor_live_feed(
+    session_id: int | None = None,
+    seconds: int = Query(default=30, ge=5, le=600),
+    limit: int = Query(default=1200, ge=100, le=5000),
+    matrix_width_mhz: float = Query(default=12.0, ge=1.0, le=40.0),
+) -> dict[str, Any]:
+    conn = connect()
+    try:
+        if session_id is None:
+            session = conn.execute(
+                "SELECT * FROM external_sensor_sessions ORDER BY sensor_session_id DESC LIMIT 1"
+            ).fetchone()
+        else:
+            session = conn.execute(
+                "SELECT * FROM external_sensor_sessions WHERE sensor_session_id = ?",
+                (session_id,),
+            ).fetchone()
+        if not session:
+            return {"ok": False, "message": "No live sensor session has been created yet."}
+        session_d = dict(session)
+        collection_id = int(session_d["collection_id"])
+        rows = rows_to_dicts(conn.execute(
+            """
+            SELECT event_id, timestamp_utc, frequency_hz, strength_dbm, valid, validation_notes
+            FROM moth_events
+            WHERE collection_id = ? AND frequency_hz IS NOT NULL AND strength_dbm IS NOT NULL
+            ORDER BY event_id DESC
+            LIMIT ?
+            """,
+            (collection_id, int(limit)),
+        ).fetchall())
+        recent_rows = rows_to_dicts(conn.execute(
+            """
+            SELECT event_id, timestamp_utc, frequency_hz, strength_dbm, valid, validation_notes
+            FROM moth_events
+            WHERE collection_id = ?
+              AND frequency_hz IS NOT NULL
+              AND strength_dbm IS NOT NULL
+              AND timestamp_utc >= datetime('now', ?)
+            ORDER BY event_id DESC
+            LIMIT ?
+            """,
+            (collection_id, f"-{int(seconds)} seconds", int(limit)),
+        ).fetchall())
+        if not recent_rows:
+            recent_rows = rows
+        message_counts = rows_to_dicts(conn.execute(
+            """
+            SELECT message_type, COUNT(*) AS count, MAX(received_utc) AS last_utc
+            FROM raw_sensor_messages
+            WHERE sensor_session_id = ?
+            GROUP BY message_type
+            ORDER BY count DESC
+            """,
+            (int(session_d["sensor_session_id"]),),
+        ).fetchall())
+    finally:
+        conn.close()
+
+    now = datetime.now(timezone.utc)
+    last_dt = _live_feed_parse_utc(session_d.get("last_message_utc"))
+    age_s = int((now - last_dt).total_seconds()) if last_dt else None
+    active = age_s is not None and age_s <= max(10, int(seconds) * 2)
+
+    buckets: dict[float, dict[str, Any]] = {}
+    peak: dict[str, Any] | None = None
+    for row in recent_rows:
+        mhz = float(row["frequency_hz"] or 0) / 1_000_000.0
+        dbm = float(row["strength_dbm"])
+        key = round(mhz, 3)
+        b = buckets.setdefault(key, {"freq_mhz": key, "count": 0, "max_dbm": None, "avg_dbm": 0.0, "latest_utc": None})
+        b["count"] += 1
+        b["avg_dbm"] += dbm
+        b["max_dbm"] = dbm if b["max_dbm"] is None else max(float(b["max_dbm"]), dbm)
+        if not b["latest_utc"] or str(row["timestamp_utc"]) > str(b["latest_utc"]):
+            b["latest_utc"] = row["timestamp_utc"]
+        if peak is None or dbm > float(peak["max_dbm"]):
+            peak = {"freq_mhz": round(mhz, 3), "max_dbm": dbm, "timestamp_utc": row["timestamp_utc"]}
+    spectrum = []
+    for b in buckets.values():
+        b["avg_dbm"] = round(float(b["avg_dbm"]) / max(int(b["count"]), 1), 1)
+        spectrum.append(b)
+    spectrum.sort(key=lambda x: float(x["freq_mhz"]))
+
+    matrix_rows = []
+    any_gnss_poor = False
+    any_gnss_warning = False
+    for constellation, bands in _LIVE_GNSS_MATRIX:
+        cells = []
+        for band_name in ("L5", "L2", "L1"):
+            center = bands.get(band_name)
+            if center is None:
+                cells.append({"band": band_name, "status": "not_applicable", "center_mhz": None, "count": 0, "max_dbm": None})
+                continue
+            lo = center - float(matrix_width_mhz)
+            hi = center + float(matrix_width_mhz)
+            vals = [
+                float(r["strength_dbm"]) for r in recent_rows
+                if r.get("frequency_hz") is not None and lo <= (float(r["frequency_hz"]) / 1_000_000.0) <= hi
+            ]
+            max_dbm = max(vals) if vals else None
+            status = _live_feed_level(max_dbm, len(vals))
+            any_gnss_poor = any_gnss_poor or status == "poor"
+            any_gnss_warning = any_gnss_warning or status == "warning"
+            cells.append({"band": band_name, "status": status, "center_mhz": center, "count": len(vals), "max_dbm": max_dbm})
+        matrix_rows.append({"constellation": constellation, "cells": cells})
+
+    peak_dbm = float(peak["max_dbm"]) if peak else None
+    interference_detected = peak_dbm is not None and peak_dbm >= -82.0
+    jamming_detected = bool(any_gnss_poor or (peak_dbm is not None and 1150.0 <= float(peak["freq_mhz"]) <= 1620.0 and peak_dbm >= -65.0))
+    gps_msg = next((m for m in message_counts if str(m.get("message_type", "")).upper() == "GPS_RAW_INT"), None)
+    gps_last_dt = _live_feed_parse_utc(str(gps_msg.get("last_utc"))) if gps_msg else None
+    gps_age_s = int((now - gps_last_dt).total_seconds()) if gps_last_dt else None
+    gps_fix_type = session_d.get("gps_fix_type")
+    satellites_seen = session_d.get("satellites_seen")
+    lat = session_d.get("last_lat")
+    lon = session_d.get("last_lon")
+    gps_present = gps_msg is not None
+    no_fix_with_gps = gps_present and (gps_fix_type is None or int(gps_fix_type or 0) <= 1 or int(satellites_seen or 0) <= 0)
+    zero_position = gps_present and abs(float(lat or 0.0)) < 0.000001 and abs(float(lon or 0.0)) < 0.000001
+    stale_gps_while_rf_live = active and gps_age_s is not None and gps_age_s > max(30, int(seconds) * 2)
+    spoofing_possible = bool(no_fix_with_gps or zero_position or stale_gps_while_rf_live)
+    spoofing_state = "Possible" if spoofing_possible else ("Not indicated" if gps_present else "No GNSS data")
+    assistant = []
+    if interference_detected and peak:
+        assistant.append({
+            "severity": "poor" if peak_dbm >= -65.0 else "warning",
+            "title": f"Interference indicator at {peak['freq_mhz']} MHz",
+            "action": "Review spectrum peak, confirm antenna/cable state, and compare against authorised link bands.",
+        })
+    else:
+        assistant.append({"severity": "good", "title": "No strong live interference peak in the current sample", "action": "Continue monitoring."})
+    if jamming_detected:
+        assistant.append({"severity": "poor", "title": "GNSS-window jamming indicator detected", "action": "Check the signal matrix and open Launch Readiness before flight decisions."})
+    elif any_gnss_warning:
+        assistant.append({"severity": "warning", "title": "GNSS-window warning activity detected", "action": "Check signal matrix and keep monitoring before launch."})
+    else:
+        assistant.append({"severity": "good", "title": "No GNSS-window jamming indicator in the current live sample", "action": "Live spectrum may still show non-GNSS RF activity."})
+    if spoofing_possible:
+        reasons = []
+        if no_fix_with_gps:
+            reasons.append(f"GPS packets report fix {gps_fix_type if gps_fix_type is not None else '-'} with {satellites_seen if satellites_seen is not None else '-'} satellites")
+        if zero_position:
+            reasons.append("GNSS position is 0/0")
+        if stale_gps_while_rf_live:
+            reasons.append(f"latest GPS packet is {gps_age_s}s old while RF is live")
+        assistant.append({
+            "severity": "warning",
+            "title": "Possible GNSS spoofing / integrity anomaly",
+            "action": "Treat as a receiver-integrity warning, not proof of spoofing. Cross-check aircraft/UAS receiver position, time, satellite count and compass/INS before launch. Evidence: " + "; ".join(reasons),
+        })
+    elif gps_present:
+        assistant.append({
+            "severity": "good",
+            "title": "No live spoofing indicator from GNSS health",
+            "action": "GNSS spoofing is not calibrated directly by MOTH. Continue comparing receiver position/time against trusted references.",
+        })
+    else:
+        assistant.append({
+            "severity": "check",
+            "title": "Spoofing assessment unavailable",
+            "action": "No GNSS receiver packet has been received in this session. Connect/enable GNSS telemetry to assess position, time and satellite integrity.",
+        })
+
+    return {
+        "ok": True,
+        "generated_utc": now.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "active": active,
+        "sample_seconds": int(seconds),
+        "sample_event_count": len(recent_rows),
+        "session": session_d,
+        "feed_age_seconds": age_s,
+        "message_types": message_counts,
+        "device": {
+            "model": session_d.get("hardware_version") or session_d.get("device_serial") or "MOTH SDK",
+            "source_port": session_d.get("source_port"),
+            "baud_rate": session_d.get("baud_rate"),
+            "status": "LIVE" if active else "STALE",
+            "last_message_utc": session_d.get("last_message_utc"),
+        },
+        "position": {
+            "lat": session_d.get("last_lat"),
+            "lon": session_d.get("last_lon"),
+            "altitude_msl_m": session_d.get("last_altitude_msl_m"),
+            "gps_fix_type": session_d.get("gps_fix_type"),
+            "satellites_seen": session_d.get("satellites_seen"),
+        },
+        "health": {
+            "battery_remaining": session_d.get("battery_remaining"),
+            "message_count": session_d.get("message_count"),
+            "rf_event_count": session_d.get("rf_event_count"),
+        },
+        "detection": {
+            "interference": "Detected" if interference_detected else "Not detected",
+            "jamming": "Detected" if jamming_detected else "Not detected",
+            "spoofing": spoofing_state,
+            "peak": peak,
+        },
+        "assistant": assistant,
+        "signal_matrix": matrix_rows,
+        "spectrum": spectrum,
+        "top_peaks": sorted(spectrum, key=lambda x: float(x["max_dbm"] if x["max_dbm"] is not None else -999), reverse=True)[:10],
+    }
+
+
+@app.post("/api/sensors/sessions")
+def api_start_sensor_session(body: SensorSessionIn) -> dict[str, Any]:
+    return start_sensor_session(
+        sensor_kind=body.sensor_kind,
+        session_uuid=body.session_uuid,
+        collection_name=body.collection_name,
+        transport=body.transport,
+        device_serial=body.device_serial,
+        firmware_version=body.firmware_version,
+        hardware_version=body.hardware_version,
+        sdk_version=body.sdk_version,
+        source_port=body.source_port,
+        baud_rate=body.baud_rate,
+        notes=body.notes,
+        db_path=DB_PATH,
+    )
+
+
+@app.post("/api/sensors/messages")
+def api_ingest_sensor_message(body: SensorMessageIn) -> dict[str, Any]:
+    try:
+        return ingest_sensor_message(
+            session_uuid=body.session_uuid,
+            sensor_kind=body.sensor_kind,
+            payload=body.payload,
+            db_path=DB_PATH,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/sensors/messages/batch")
+def api_ingest_sensor_message_batch(body: SensorMessageBatchIn) -> dict[str, Any]:
+    if not body.payloads:
+        return {"ok": True, "message_count": 0, "normalized_event_count": 0, "errors": []}
+    normalized = 0
+    errors: list[str] = []
+    for i, payload in enumerate(body.payloads):
+        try:
+            result = ingest_sensor_message(
+                session_uuid=body.session_uuid,
+                sensor_kind=body.sensor_kind,
+                payload=payload,
+                db_path=DB_PATH,
+            )
+            normalized += int(result.get("normalized_event_count") or 0)
+        except ValueError as exc:
+            errors.append(f"{i}: {exc}")
+    return {
+        "ok": not errors,
+        "message_count": len(body.payloads),
+        "normalized_event_count": normalized,
+        "errors": errors[:10],
+    }
+
 @app.get("/api/quality/summary")
 def api_quality_summary():
     return get_latest_quality_summary(DB_PATH)
@@ -63,7 +402,7 @@ def api_quality_summary():
 
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
-    return (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    return (STATIC_DIR / "platform_home.html").read_text(encoding="utf-8")
 
 
 @app.get("/api/health")
@@ -2351,6 +2690,83 @@ def _moth_adv_parse_dt(value):
         return None
 
 
+_MOTH_ADV_TIMELINE_MIN_UTC = "2020-01-01T00:00:00Z"
+_MOTH_ADV_TIMELINE_MAX_UTC = "2035-12-31T23:59:59Z"
+_MOTH_ADV_TIMELINE_MIN_DT = _moth_datetime(2020, 1, 1, tzinfo=_moth_timezone.utc)
+_MOTH_ADV_TIMELINE_MAX_DT = _moth_datetime(2035, 12, 31, 23, 59, 59, tzinfo=_moth_timezone.utc)
+
+
+def _moth_adv_timeline_time_split(rows):
+    sane_rows = []
+    anomaly_rows = []
+    for row in rows:
+        dt = _moth_adv_parse_dt(row.get("timestamp_utc"))
+        if dt is not None and _MOTH_ADV_TIMELINE_MIN_DT <= dt <= _MOTH_ADV_TIMELINE_MAX_DT:
+            sane_rows.append(row)
+        else:
+            anomaly_rows.append(row)
+    return sane_rows, anomaly_rows
+
+
+def _moth_adv_sample_anomaly_timestamps(rows, limit=5):
+    samples = []
+    seen = set()
+    for row in rows:
+        ts = row.get("timestamp_utc")
+        if ts in (None, ""):
+            ts = "<missing>"
+        ts = str(ts)
+        if ts in seen:
+            continue
+        seen.add(ts)
+        samples.append(ts)
+        if len(samples) >= int(limit):
+            break
+    return samples
+
+def _moth_adv_time_anomaly_summary(
+    *,
+    collection_id=None,
+    collection_ids=None,
+    start_utc=None,
+    end_utc=None,
+    min_hz=None,
+    max_hz=None,
+    min_dbm=None,
+):
+    ids = _moth_adv_parse_ids(collection_id, collection_ids)
+    where = ["valid = 1", "timestamp_utc IS NOT NULL", "frequency_hz IS NOT NULL", "strength_dbm IS NOT NULL"]
+    params = []
+    _moth_adv_collection_where(ids, where, params)
+    if start_utc:
+        where.append("timestamp_utc >= ?")
+        params.append(str(start_utc))
+    if end_utc:
+        where.append("timestamp_utc <= ?")
+        params.append(str(end_utc))
+    if min_hz is not None:
+        where.append("frequency_hz >= ?")
+        params.append(float(min_hz))
+    if max_hz is not None:
+        where.append("frequency_hz <= ?")
+        params.append(float(max_hz))
+    if min_dbm is not None:
+        where.append("strength_dbm >= ?")
+        params.append(float(min_dbm))
+    where.append("(timestamp_utc < ? OR timestamp_utc > ?)")
+    params.extend([_MOTH_ADV_TIMELINE_MIN_UTC, _MOTH_ADV_TIMELINE_MAX_UTC])
+    sql_where = " AND ".join(where)
+    conn = connect()
+    try:
+        count = int(conn.execute("SELECT COUNT(*) FROM moth_events WHERE " + sql_where, params).fetchone()[0] or 0)
+        sample_rows = rows_to_dicts(conn.execute(
+            "SELECT DISTINCT timestamp_utc FROM moth_events WHERE " + sql_where + " ORDER BY timestamp_utc ASC LIMIT 5",
+            params,
+        ).fetchall())
+    finally:
+        conn.close()
+    return {"count": count, "samples": [str(row.get("timestamp_utc")) for row in sample_rows if row.get("timestamp_utc") is not None]}
+
 def _moth_adv_parse_ids(collection_id=None, collection_ids=None):
     ids = []
     if collection_id not in (None, ""):
@@ -2553,6 +2969,7 @@ def moth_advanced_gnss_timeline(
     radius_m: float = _MothQuery(default=1500.0, ge=50.0, le=10000.0),
     min_dbm: float | None = None,
     max_rows: int = _MothQuery(default=160000, ge=1000, le=500000),
+    include_time_anomalies: bool = False,
 ) -> dict[str, _MothAny]:
     """L1/L2/L5 binned timeline.
 
@@ -2566,7 +2983,14 @@ def moth_advanced_gnss_timeline(
         collection_id=collection_id, collection_ids=collection_ids, start_utc=start_utc, end_utc=end_utc,
         min_hz=min_hz, max_hz=max_hz, min_dbm=min_dbm, max_rows=max_rows,
     )
+    queried_row_count = len(rows)
     rows, candidate = _moth_adv_candidate_filter(rows, candidate_id, radius_m)
+    candidate_filtered_row_count = len(rows)
+    sane_rows, time_anomaly_rows = _moth_adv_timeline_time_split(rows)
+    time_anomaly_count = len(time_anomaly_rows)
+    if not include_time_anomalies:
+        rows = sane_rows
+    plotted_row_count = len(rows)
     bucket_seconds = int(bin_minutes) * 60
     buckets = _moth_dd(lambda: {"L1": [], "L2": [], "L5": [], "other": []})
     first_dt = None; last_dt = None
@@ -2604,6 +3028,20 @@ def moth_advanced_gnss_timeline(
         "radius_m": radius_m if candidate else None,
         "width_mhz": width_mhz,
         "bucket_seconds": bucket_seconds,
+        "queried_row_count": queried_row_count,
+        "candidate_filtered_row_count": candidate_filtered_row_count,
+        "plotted_row_count": plotted_row_count,
+        "include_time_anomalies": bool(include_time_anomalies),
+        "time_anomaly_count": time_anomaly_count,
+        "excluded_time_anomaly_count": 0 if include_time_anomalies else len(time_anomaly_rows),
+        "time_filter": {
+            "mode": "all_timestamps" if include_time_anomalies else "sane_default",
+            "min_utc": _MOTH_ADV_TIMELINE_MIN_UTC,
+            "max_utc": _MOTH_ADV_TIMELINE_MAX_UTC,
+            "time_anomaly_count": time_anomaly_count,
+            "excluded_time_anomaly_count": 0 if include_time_anomalies else len(time_anomaly_rows),
+            "sample_anomaly_timestamps": _moth_adv_sample_anomaly_timestamps(time_anomaly_rows),
+        },
         "first_timestamp_utc": _moth_adv_iso(first_dt) if first_dt else None,
         "last_timestamp_utc": _moth_adv_iso(last_dt) if last_dt else None,
         "bands": {name: {"min_hz": lo, "max_hz": hi, "center_hz": centre, "note": _MOTH_GNSS_BANDS[name]["note"]} for name, (lo, hi, centre) in edges.items()},
@@ -2720,16 +3158,74 @@ def moth_advanced_launch_windows(
     candidate_id: int | None = None,
     radius_m: float = _MothQuery(default=1500.0, ge=50.0, le=10000.0),
     max_rows: int = _MothQuery(default=160000, ge=1000, le=500000),
+    include_time_anomalies: bool = False,
 ) -> dict[str, _MothAny]:
     edges = _moth_adv_gnss_edges(width_mhz)
     min_hz = min([v[0] for v in edges.values()] + ([float(connectivity_min_hz)] if connectivity_min_hz else []))
     max_hz = max([v[1] for v in edges.values()] + ([float(connectivity_max_hz)] if connectivity_max_hz else []))
-    rows, ids = _moth_adv_query_events(collection_id=collection_id, collection_ids=collection_ids, start_utc=start_utc, end_utc=end_utc, min_hz=min_hz, max_hz=max_hz, max_rows=max_rows)
+    if include_time_anomalies and not (start_utc and end_utc):
+        raise _MothHTTPException(status_code=400, detail="include_time_anomalies=true requires explicit start_utc and end_utc for launch-window scoring")
+    anomaly_summary = {"count": 0, "samples": []}
+    query_start_utc = start_utc
+    query_end_utc = end_utc
+    if not include_time_anomalies:
+        start_dt_param = _moth_adv_parse_dt(start_utc)
+        end_dt_param = _moth_adv_parse_dt(end_utc)
+        if start_dt_param is None or start_dt_param < _MOTH_ADV_TIMELINE_MIN_DT:
+            query_start_utc = _MOTH_ADV_TIMELINE_MIN_UTC
+        if end_dt_param is None or end_dt_param > _MOTH_ADV_TIMELINE_MAX_DT:
+            query_end_utc = _MOTH_ADV_TIMELINE_MAX_UTC
+    rows, ids = _moth_adv_query_events(collection_id=collection_id, collection_ids=collection_ids, start_utc=query_start_utc, end_utc=query_end_utc, min_hz=min_hz, max_hz=max_hz, max_rows=max_rows)
+    queried_row_count = len(rows)
     rows, candidate = _moth_adv_candidate_filter(rows, candidate_id, radius_m)
+    candidate_filtered_row_count = len(rows)
+    sane_rows, time_anomaly_rows = _moth_adv_timeline_time_split(rows)
+    if not include_time_anomalies:
+        rows = sane_rows
+    plotted_row_count = len(rows)
+    time_anomaly_count = int(anomaly_summary.get("count") or 0) + len(time_anomaly_rows)
+    excluded_time_anomaly_count = 0 if include_time_anomalies else time_anomaly_count
+    anomaly_samples = list(anomaly_summary.get("samples") or [])
+    for sample in _moth_adv_sample_anomaly_timestamps(time_anomaly_rows):
+        if sample not in anomaly_samples:
+            anomaly_samples.append(sample)
+    launch_time_filter = {
+        "mode": "all_timestamps" if include_time_anomalies else "sane_default",
+        "date_sanity_filter_applied": not include_time_anomalies,
+        "min_utc": _MOTH_ADV_TIMELINE_MIN_UTC,
+        "max_utc": _MOTH_ADV_TIMELINE_MAX_UTC,
+        "time_anomaly_count": time_anomaly_count,
+        "excluded_time_anomaly_count": excluded_time_anomaly_count,
+        "sample_anomaly_timestamps": anomaly_samples[:5],
+    }
     dts = [(_moth_adv_parse_dt(r.get("timestamp_utc")), r) for r in rows]
     dts = [(dt, r) for dt, r in dts if dt]
     if not dts:
-        return {"version": _MOTH_ADVANCED_VERSION, "selected_collection_ids": ids, "windows": [], "definition": "No matching MOTH events for current filters."}
+        return {
+            "version": _MOTH_ADVANCED_VERSION,
+            "selected_collection_ids": ids,
+            "candidate": candidate,
+            "radius_m": radius_m if candidate else None,
+            "windows": [],
+            "definition": "No matching MOTH events for current filters after timestamp sanity filtering.",
+            "queried_row_count": queried_row_count,
+            "candidate_filtered_row_count": candidate_filtered_row_count,
+            "plotted_row_count": plotted_row_count,
+            "include_time_anomalies": bool(include_time_anomalies),
+            "time_anomaly_count": time_anomaly_count,
+            "excluded_time_anomaly_count": excluded_time_anomaly_count,
+            "time_filter": launch_time_filter,
+            "operator_brief": {
+                "headline": "No launch timing can be assessed from the current filters.",
+                "recommendation": "Use Start UTC and End UTC filters on the left to inspect a deliberate period, or load more valid mission-time data.",
+                "rationale": ["Timestamp sanity filtering removed anomalous rows outside the mission-time range."],
+                "decision_status": "NO DATA",
+            },
+            "limitations": [
+                "This ranks RF cleanliness from MOTH event logs. It does not replace airspace approval, UAS safety procedures, GNSS integrity checks, or operational flight-risk assessment.",
+                "A quiet MOTH window means fewer detected events, not guaranteed absence of interference.",
+            ],
+        }
     start_dt = _moth_adv_parse_dt(start_utc) or min(dt for dt, _r in dts)
     end_dt = _moth_adv_parse_dt(end_utc) or max(dt for dt, _r in dts)
     dur = _moth_timedelta(minutes=int(duration_minutes))
@@ -2811,6 +3307,13 @@ def moth_advanced_launch_windows(
         "step_minutes": step_minutes,
         "width_mhz": width_mhz,
         "spike_dbm": spike_dbm,
+        "queried_row_count": queried_row_count,
+        "candidate_filtered_row_count": candidate_filtered_row_count,
+        "plotted_row_count": plotted_row_count,
+        "include_time_anomalies": bool(include_time_anomalies),
+        "time_anomaly_count": time_anomaly_count,
+        "excluded_time_anomaly_count": excluded_time_anomaly_count,
+        "time_filter": launch_time_filter,
         "connectivity_band_hz": [connectivity_min_hz, connectivity_max_hz] if connectivity_min_hz is not None and connectivity_max_hz is not None else None,
         "definition": "Launch windows are ranked by low detected RF activity in L1/L2/L5 windows, low strong-spike count, and optional connectivity-band evidence if supplied.",
         "recommended_window": best if best and best.get("recommendation_type") == "RECOMMENDED" else None,
@@ -2854,6 +3357,13 @@ def moth_advanced_operator_brief(
         "step_minutes": step_minutes,
         "width_mhz": width_mhz,
         "spike_dbm": spike_dbm,
+        "queried_row_count": windows.get("queried_row_count"),
+        "candidate_filtered_row_count": windows.get("candidate_filtered_row_count"),
+        "plotted_row_count": windows.get("plotted_row_count"),
+        "include_time_anomalies": windows.get("include_time_anomalies"),
+        "time_anomaly_count": windows.get("time_anomaly_count"),
+        "excluded_time_anomaly_count": windows.get("excluded_time_anomaly_count"),
+        "time_filter": windows.get("time_filter"),
         "connectivity_band_hz": windows.get("connectivity_band_hz"),
     }
     brief["ai_handoff"] = "The AI HAT+ 2 can turn this traceable metric bundle into richer prose. The metric score remains deterministic."
@@ -5209,8 +5719,9 @@ def _j2_safe_key(text: str) -> str:
     return key or "default"
 
 
-def _j2_news_cache_path(aoi: str) -> _J2Path:
-    return _j2_cache_dir() / f"news_{_j2_safe_key(aoi)}.json"
+def _j2_news_cache_path(aoi: str, date_from: str | None = None) -> _J2Path:
+    suffix = f"_{_j2_safe_key(date_from)}" if date_from else ""
+    return _j2_cache_dir() / f"news_{_j2_safe_key(aoi)}{suffix}.json"
 
 
 def _j2_report_cache_path() -> _J2Path:
@@ -5244,6 +5755,62 @@ def _j2_clean_text(value: str | None) -> str:
     return text
 
 
+def _j2_http_url(value: str | None) -> str | None:
+    text = _j2_html.unescape(str(value or "").strip())
+    if not text:
+        return None
+    try:
+        parsed = _j2_urllib_parse.urlparse(text)
+        if parsed.scheme in ("http", "https") and parsed.netloc:
+            return text
+    except Exception:
+        return None
+    return None
+
+
+def _j2_domain_from_url(value: str | None) -> str | None:
+    url = _j2_http_url(value)
+    if not url:
+        return None
+    try:
+        host = _j2_urllib_parse.urlparse(url).netloc.lower()
+        if host.startswith("www."):
+            host = host[4:]
+        return host or None
+    except Exception:
+        return None
+
+
+def _j2_source_icon_url(value: str | None) -> str | None:
+    domain = _j2_domain_from_url(value)
+    if not domain:
+        return None
+    return "https://www.google.com/s2/favicons?" + _j2_urllib_parse.urlencode({"domain": domain, "sz": "64"})
+
+
+def _j2_rss_image_url(item: _J2Any, description_html: str | None = None) -> str | None:
+    try:
+        for child in list(item):
+            tag = str(getattr(child, "tag", "")).lower()
+            if tag.endswith("thumbnail") or tag.endswith("content"):
+                url = _j2_http_url(child.attrib.get("url"))
+                medium = str(child.attrib.get("medium") or "").lower()
+                type_hint = str(child.attrib.get("type") or "").lower()
+                if url and (not medium or medium == "image" or type_hint.startswith("image/")):
+                    return url
+        enclosure = item.find("enclosure")
+        if enclosure is not None:
+            url = _j2_http_url(enclosure.attrib.get("url"))
+            type_hint = str(enclosure.attrib.get("type") or "").lower()
+            if url and (not type_hint or type_hint.startswith("image/")):
+                return url
+    except Exception:
+        pass
+    raw = _j2_html.unescape(str(description_html or ""))
+    match = _j2_re.search(r"<img[^>]+src=[\"']([^\"']+)[\"']", raw, flags=_j2_re.I)
+    return _j2_http_url(match.group(1)) if match else None
+
+
 def _j2_pub_to_iso(value: str | None) -> str | None:
     text = _j2_clean_text(value)
     if not text:
@@ -5255,6 +5822,69 @@ def _j2_pub_to_iso(value: str | None) -> str | None:
         return dt.astimezone(_j2_timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     except Exception:
         return text
+
+
+def _j2_parse_date_from(value: str | None) -> _j2_datetime | None:
+    text = _j2_clean_text(value)
+    if not text:
+        return None
+    try:
+        if _j2_re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            dt = _j2_datetime.fromisoformat(text + "T00:00:00+00:00")
+        else:
+            dt = _j2_datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_j2_timezone.utc)
+        return dt.astimezone(_j2_timezone.utc).replace(microsecond=0)
+    except Exception:
+        return None
+
+
+def _j2_date_from_key(value: str | None) -> str | None:
+    dt = _j2_parse_date_from(value)
+    return dt.date().isoformat() if dt else None
+
+
+def _j2_article_date(item: dict[str, _J2Any]) -> _j2_datetime | None:
+    return _j2_parse_date_from(str(item.get("published_utc") or ""))
+
+
+def _j2_date_allowed(item: dict[str, _J2Any], since: _j2_datetime | None) -> bool:
+    if since is None:
+        return True
+    published = _j2_article_date(item)
+    if published is not None:
+        return published >= since
+    return not bool(item.get("live"))
+
+
+def _j2_relevance_score(item: dict[str, _J2Any], aoi: str, since: _j2_datetime | None = None) -> int:
+    text = " ".join(str(item.get(k) or "") for k in ("title", "summary", "category", "source", "query")).lower()
+    score = 0
+    if item.get("live"):
+        score += 25
+    published = _j2_article_date(item)
+    if published:
+        age_days = max(0, int((_j2_datetime.now(_j2_timezone.utc) - published).total_seconds() // 86400))
+        score += max(0, 32 - min(age_days, 32))
+        if since and published >= since:
+            score += 8
+    elif item.get("live"):
+        score -= 20
+    aoi_tokens = [t for t in _j2_re.split(r"[^a-z0-9]+", (aoi or "").lower()) if len(t) >= 4]
+    if any(t in text for t in aoi_tokens):
+        score += 16
+    if any(k in text for k in ["gnss", "gps", "jamming", "spoofing", "interference", "rf", "vhf", "spectrum"]):
+        score += 22
+    if any(k in text for k in ["aviation", "airport", "airspace", "notam", "easa", "caa", "czib", "uas", "drone"]):
+        score += 18
+    if any(k in text for k in ["security", "police", "conflict", "shabaab", "isis", "islamic state", "checkpoint", "attack"]):
+        score += 12
+    if str(item.get("confidence") or "").lower().startswith("official"):
+        score += 10
+    if not item.get("live"):
+        score -= 6
+    return score
 
 
 def _j2_parse_ids(collection_id: int | None = None, collection_ids: str | None = None) -> list[int]:
@@ -5537,19 +6167,19 @@ def _j2_query_variants(aoi: str) -> list[str]:
     base = (aoi or _J2_DEFAULT_AOI).strip()
     if _j2_is_uk_aoi(base):
         terms = [
-            f"{base} GNSS GPS interference aviation",
-            f"{base} RF interference communications outage aviation",
-            f"{base} drone airport disruption security",
-            "United Kingdom GNSS interference aviation GPS jamming",
-            "Lincolnshire aviation security communications disruption",
+            f'"{base}" (GNSS OR GPS) (jamming OR spoofing OR interference) (aviation OR airport OR airspace)',
+            f'"{base}" (RF OR VHF OR communications) (interference OR outage OR disruption) aviation',
+            f'"{base}" (airport OR airspace OR drone OR UAS) (security OR disruption OR NOTAM)',
+            '"United Kingdom" (GNSS OR GPS) (jamming OR spoofing OR interference) aviation',
+            '"Lincolnshire" (aviation OR airport OR drone) (security OR disruption OR communications)',
         ]
     else:
         terms = [
-            f'{base} GNSS jamming GPS interference aviation',
-            f'{base} GPS jamming spoofing GNSS',
-            'Mogadishu FIR GNSS jamming spoofing GPS interference',
-            'Somalia GNSS jamming GPS interference aviation',
-            'HCSM Mogadishu GNSS jamming spoofing',
+            f'"{base}" (GNSS OR GPS) (jamming OR spoofing OR interference) aviation',
+            f'"{base}" (airport OR airspace OR security) (Al-Shabaab OR ISIS OR disruption)',
+            '"Mogadishu FIR" (GNSS OR GPS) (jamming OR spoofing OR interference)',
+            'Somalia (GNSS OR GPS) (jamming OR spoofing OR interference) aviation',
+            'HCSM Mogadishu GNSS GPS jamming spoofing',
         ]
     seen: set[str] = set()
     out: list[str] = []
@@ -5561,8 +6191,9 @@ def _j2_query_variants(aoi: str) -> list[str]:
     return out
 
 
-def _j2_fetch_news_rss(query: str, limit: int) -> tuple[list[dict[str, _J2Any]], str | None]:
-    rss_url = "https://news.google.com/rss/search?" + _j2_urllib_parse.urlencode({"q": query, "hl": "en-GB", "gl": "GB", "ceid": "GB:en"})
+def _j2_fetch_news_rss(query: str, limit: int, date_from: str | None = None) -> tuple[list[dict[str, _J2Any]], str | None]:
+    query_text = f"{query} after:{date_from}" if date_from else query
+    rss_url = "https://news.google.com/rss/search?" + _j2_urllib_parse.urlencode({"q": query_text, "hl": "en-GB", "gl": "GB", "ceid": "GB:en"})
     req = _j2_urllib_request.Request(rss_url, headers={"User-Agent": "EEI-LANTERN-J2/0.11.3"})
     try:
         with _j2_urllib_request.urlopen(req, timeout=7) as resp:
@@ -5573,20 +6204,27 @@ def _j2_fetch_news_rss(query: str, limit: int) -> tuple[list[dict[str, _J2Any]],
             title = _j2_clean_text(item.findtext("title"))
             url = _j2_clean_text(item.findtext("link"))
             pub = _j2_pub_to_iso(item.findtext("pubDate"))
-            desc = _j2_clean_text(item.findtext("description"))
+            desc_raw = item.findtext("description")
+            desc = _j2_clean_text(desc_raw)
             source_el = item.find("source")
             source = _j2_clean_text(source_el.text if source_el is not None else "Google News") or "Google News"
+            source_url = _j2_http_url(source_el.attrib.get("url") if source_el is not None else None)
+            image_url = _j2_rss_image_url(item, desc_raw)
+            source_icon_url = _j2_source_icon_url(source_url or url)
             if not title or not url:
                 continue
             items.append({
                 "title": title,
                 "source": source,
+                "source_url": source_url,
                 "url": url,
                 "published_utc": pub,
                 "category": "Live OSINT",
                 "confidence": "live-feed",
                 "summary": desc[:520],
-                "query": query,
+                "image_url": image_url,
+                "source_icon_url": source_icon_url,
+                "query": query_text,
                 "live": True,
             })
         return items, None
@@ -5594,23 +6232,34 @@ def _j2_fetch_news_rss(query: str, limit: int) -> tuple[list[dict[str, _J2Any]],
         return [], str(exc)
 
 
-def _j2_fetch_live_articles(aoi: str, limit: int) -> tuple[list[dict[str, _J2Any]], list[str]]:
+def _j2_fetch_live_articles(aoi: str, limit: int, date_from: str | None = None) -> tuple[list[dict[str, _J2Any]], list[str]]:
     items: list[dict[str, _J2Any]] = []
     errors: list[str] = []
     for query in _j2_query_variants(aoi):
-        got, err = _j2_fetch_news_rss(query, max(3, min(10, int(limit))))
+        got, err = _j2_fetch_news_rss(query, max(5, min(15, int(limit))), date_from=date_from)
         if err:
             errors.append(f"{query}: {err}")
         items.extend(got)
-        if len(items) >= int(limit):
+        if len(items) >= int(limit) * 2:
             break
     return items, errors[:5]
 
 
-def _j2_dedupe_articles(items: list[dict[str, _J2Any]], limit: int = 20) -> list[dict[str, _J2Any]]:
+def _j2_dedupe_articles(items: list[dict[str, _J2Any]], limit: int = 20, aoi: str = _J2_DEFAULT_AOI, date_from: str | None = None) -> list[dict[str, _J2Any]]:
+    since = _j2_parse_date_from(date_from)
+    ranked: list[dict[str, _J2Any]] = []
+    for item in items:
+        if not isinstance(item, dict) or not _j2_date_allowed(item, since):
+            continue
+        copied = dict(item)
+        if not copied.get("source_icon_url"):
+            copied["source_icon_url"] = _j2_source_icon_url(str(copied.get("source_url") or copied.get("url") or ""))
+        copied["relevance_score"] = _j2_relevance_score(copied, aoi, since)
+        ranked.append(copied)
+    ranked.sort(key=lambda x: (int(x.get("relevance_score") or 0), str(x.get("published_utc") or "")), reverse=True)
     seen: set[str] = set()
     out: list[dict[str, _J2Any]] = []
-    for item in items:
+    for item in ranked:
         url = str(item.get("url") or "").strip()
         title = str(item.get("title") or "").strip()
         key = (url or title).lower()
@@ -5625,10 +6274,11 @@ def _j2_dedupe_articles(items: list[dict[str, _J2Any]], limit: int = 20) -> list
     return out
 
 
-def _j2_news_payload(aoi: str, live: bool, limit: int, force: bool = False) -> dict[str, _J2Any]:
+def _j2_news_payload(aoi: str, live: bool, limit: int, force: bool = False, date_from: str | None = None) -> dict[str, _J2Any]:
     aoi = mission_aoi_query_text(aoi, default=_J2_DEFAULT_AOI)
     limit = max(1, min(int(limit), 50))
-    cache_path = _j2_news_cache_path(aoi)
+    date_from_key = _j2_date_from_key(date_from)
+    cache_path = _j2_news_cache_path(aoi, date_from_key)
     cached = _j2_read_json(cache_path)
     cache_age = None
     if cached:
@@ -5637,6 +6287,22 @@ def _j2_news_payload(aoi: str, live: bool, limit: int, force: bool = False) -> d
         except Exception:
             cache_age = None
     if cached and not force and (not live or (cache_age is not None and cache_age < _J2_CACHE_SECONDS)):
+        cached_items = cached.get("articles", []) if isinstance(cached.get("articles"), list) else []
+        if cached_items:
+            items = _j2_dedupe_articles(cached_items, limit=limit, aoi=aoi, date_from=date_from_key)
+            cached["articles"] = items
+            cached["count"] = len(items)
+            cached["live_count"] = sum(1 for item in items if item.get("live"))
+            cached["source_log"] = [
+                {"source": item.get("source"), "url": item.get("url"), "confidence": item.get("confidence"), "category": item.get("category"), "title": item.get("title"), "published_utc": item.get("published_utc"), "query": item.get("query"), "relevance_score": item.get("relevance_score")}
+                for item in items
+            ]
+        cached["date_from"] = date_from_key
+        cached.setdefault("search_quality", {
+            "mode": "date-filtered relevance ranking" if date_from_key else "relevance ranking",
+            "query_count": len(_j2_query_variants(aoi)),
+            "date_filter_applied": bool(date_from_key),
+        })
         cached["cache_used"] = True
         cached["cache_age_seconds"] = cache_age
         return cached
@@ -5644,14 +6310,14 @@ def _j2_news_payload(aoi: str, live: bool, limit: int, force: bool = False) -> d
     live_items: list[dict[str, _J2Any]] = []
     live_errors: list[str] = []
     if live:
-        live_items, live_errors = _j2_fetch_live_articles(aoi, limit=limit)
+        live_items, live_errors = _j2_fetch_live_articles(aoi, limit=limit, date_from=date_from_key)
 
     cached_items = cached.get("articles", []) if isinstance(cached, dict) else []
     for item in [*live_items, *cached_items]:
         if isinstance(item, dict) and not item.get("aoi"):
             item["aoi"] = aoi
     register_items = _j2_source_register(aoi)
-    items = _j2_dedupe_articles(live_items + cached_items + register_items, limit=limit)
+    items = _j2_dedupe_articles(live_items + cached_items + register_items, limit=limit, aoi=aoi, date_from=date_from_key)
     live_count = sum(1 for item in items if item.get("live"))
     payload = {
         "status": "ok",
@@ -5659,6 +6325,12 @@ def _j2_news_payload(aoi: str, live: bool, limit: int, force: bool = False) -> d
         "generated_utc": _j2_now(),
         "cache_epoch": _j2_time.time(),
         "aoi": aoi,
+        "date_from": date_from_key,
+        "search_quality": {
+            "mode": "date-filtered relevance ranking" if date_from_key else "relevance ranking",
+            "query_count": len(_j2_query_variants(aoi)),
+            "date_filter_applied": bool(date_from_key),
+        },
         "live_attempted": bool(live),
         "live_count": live_count,
         "live_errors": live_errors,
@@ -5667,10 +6339,10 @@ def _j2_news_payload(aoi: str, live: bool, limit: int, force: bool = False) -> d
         "count": len(items),
         "articles": items,
         "source_log": [
-            {"source": item.get("source"), "url": item.get("url"), "confidence": item.get("confidence"), "category": item.get("category"), "title": item.get("title")}
+            {"source": item.get("source"), "url": item.get("url"), "confidence": item.get("confidence"), "category": item.get("category"), "title": item.get("title"), "published_utc": item.get("published_utc"), "query": item.get("query"), "relevance_score": item.get("relevance_score")}
             for item in items
         ],
-        "message": "Live OSINT article feed refreshed." if live_count else "Live article feed unavailable or empty; using cached/source-register links.",
+        "message": ("Live OSINT article feed refreshed." if live_count else "Live article feed unavailable or empty; using cached/source-register links.") + (f" Date from: {date_from_key}." if date_from_key else ""),
         "limitations": [
             "OSINT feeds are indicators, not local receiver measurements.",
             "Use MOTH scan data and equipment GNSS telemetry for measured serviceability decisions.",
@@ -5687,7 +6359,7 @@ def api_j2_health() -> dict[str, _J2Any]:
     return {
         "status": "ok",
         "j2_api_version": _J2_API_VERSION,
-        "page": "/static/j2_report.html?v=113",
+        "page": "/static/j2_report.html?v=118",
         "cache_dir": str(_j2_cache_dir()),
         "static_j2_report_html": (static / "j2_report.html").exists(),
         "rotate_seconds": _J2_DEFAULT_ROTATE_SECONDS,
@@ -5715,8 +6387,9 @@ def api_j2_news(
     live: bool = True,
     force: bool = False,
     limit: int = _J2Query(default=20, ge=1, le=50),
+    date_from: str | None = None,
 ) -> dict[str, _J2Any]:
-    return _j2_news_payload(aoi=aoi, live=bool(live), limit=int(limit), force=bool(force))
+    return _j2_news_payload(aoi=aoi, live=bool(live), limit=int(limit), force=bool(force), date_from=date_from)
 
 
 @app.get("/api/j2/articles")  # type: ignore[name-defined]
@@ -5725,8 +6398,9 @@ def api_j2_articles(
     live: bool = True,
     force: bool = False,
     limit: int = _J2Query(default=20, ge=1, le=50),
+    date_from: str | None = None,
 ) -> dict[str, _J2Any]:
-    return api_j2_news(aoi=aoi, live=live, force=force, limit=limit)
+    return api_j2_news(aoi=aoi, live=live, force=force, limit=limit, date_from=date_from)
 
 
 @app.post("/api/j2/news")  # type: ignore[name-defined]
@@ -5735,8 +6409,9 @@ def api_j2_news_post(
     live: bool = True,
     force: bool = False,
     limit: int = 20,
+    date_from: str | None = None,
 ) -> dict[str, _J2Any]:
-    return _j2_news_payload(aoi=aoi, live=bool(live), limit=int(limit), force=bool(force))
+    return _j2_news_payload(aoi=aoi, live=bool(live), limit=int(limit), force=bool(force), date_from=date_from)
 
 
 def _j2_assessment_from_metrics(metrics: dict[str, _J2Any], news_payload: dict[str, _J2Any]) -> dict[str, _J2Any]:
@@ -5812,10 +6487,12 @@ def api_j2_report(
     live: bool = True,
     force: bool = False,
     limit: int = _J2Query(default=20, ge=1, le=50),
+    date_from: str | None = None,
 ) -> dict[str, _J2Any]:
     aoi = mission_aoi_query_text(aoi, default=_J2_DEFAULT_AOI)
+    date_from_key = _j2_date_from_key(date_from)
     metrics = _j2_local_metrics(collection_id=collection_id, collection_ids=collection_ids)
-    news_payload = _j2_news_payload(aoi=aoi, live=bool(live), limit=int(limit), force=bool(force))
+    news_payload = _j2_news_payload(aoi=aoi, live=bool(live), limit=int(limit), force=bool(force), date_from=date_from_key)
     assessment = _j2_assessment_from_metrics(metrics, news_payload)
     sections = {
         "j2_summary": [
@@ -5845,6 +6522,7 @@ def api_j2_report(
         "j2_api_version": _J2_API_VERSION,
         "generated_utc": _j2_now(),
         "aoi": aoi,
+        "date_from": date_from_key,
         "selected_collection_ids": metrics.get("selected_collection_ids", []),
         **assessment,
         "metrics": metrics,
@@ -5871,8 +6549,9 @@ def api_j2_report_post(
     live: bool = True,
     force: bool = False,
     limit: int = 20,
+    date_from: str | None = None,
 ) -> dict[str, _J2Any]:
-    return api_j2_report(aoi=aoi, collection_id=collection_id, collection_ids=collection_ids, live=live, force=force, limit=limit)
+    return api_j2_report(aoi=aoi, collection_id=collection_id, collection_ids=collection_ids, live=live, force=force, limit=limit, date_from=date_from)
 
 
 @app.get("/api/j2/cache")  # type: ignore[name-defined]
@@ -5885,13 +6564,13 @@ def api_j2_cache() -> dict[str, _J2Any]:
 
 
 @app.get("/api/j2/live-report")  # type: ignore[name-defined]
-def api_j2_live_report(aoi: str = _J2_DEFAULT_AOI, collection_ids: str | None = None) -> dict[str, _J2Any]:
-    return api_j2_report(aoi=aoi, collection_ids=collection_ids, live=True, force=True)
+def api_j2_live_report(aoi: str = _J2_DEFAULT_AOI, collection_ids: str | None = None, date_from: str | None = None) -> dict[str, _J2Any]:
+    return api_j2_report(aoi=aoi, collection_ids=collection_ids, live=True, force=True, date_from=date_from)
 
 
 @app.get("/api/j2/report.json")  # type: ignore[name-defined]
-def api_j2_report_json(aoi: str = _J2_DEFAULT_AOI, collection_ids: str | None = None) -> dict[str, _J2Any]:
-    return api_j2_report(aoi=aoi, collection_ids=collection_ids, live=True, force=False)
+def api_j2_report_json(aoi: str = _J2_DEFAULT_AOI, collection_ids: str | None = None, date_from: str | None = None) -> dict[str, _J2Any]:
+    return api_j2_report(aoi=aoi, collection_ids=collection_ids, live=True, force=False, date_from=date_from)
 
 
 @app.get("/api/j2/report.html", response_class=_J2HTMLResponse)  # type: ignore[name-defined]
@@ -5913,7 +6592,7 @@ def api_j2_report_html() -> str:
 <style>body{{font-family:Arial,sans-serif;max-width:1100px;margin:24px auto;color:#111}}table{{width:100%;border-collapse:collapse;margin:12px 0}}td,th{{border:1px solid #bbb;padding:6px;text-align:left;vertical-align:top}}th{{background:#17365d;color:#fff}}.warn{{border-left:5px solid #b42318;padding:8px;background:#fff8f8}}small{{color:#555}}@media print{{button{{display:none}}}}</style></head><body>
 <button onclick='window.print()'>Print / save PDF</button>
 <h1>LANTERN J2 Live Report</h1>
-<p>Generated UTC: {esc(data.get('generated_utc'))} | AOI: {esc(data.get('aoi'))}</p>
+<p>Generated UTC: {esc(data.get('generated_utc'))} | AOI: {esc(data.get('aoi'))} | Date from: {esc(data.get('date_from') or 'all')}</p>
 <h2>Executive summary</h2><p><b>{esc(data.get('headline'))}</b></p><p>{esc(data.get('current_judgement'))}</p><p><b>Recommended action:</b> {esc(data.get('recommended_action'))}</p>
 <h2>Cards</h2><table><tr><th>Card</th><th>Value</th><th>Detail</th></tr>{cards}</table>
 <h2>Article/source log</h2><table><tr><th>Source</th><th>Article/source</th><th>Published</th><th>Category</th><th>Confidence</th></tr>{rows}</table>
@@ -5945,13 +6624,13 @@ def api_j2_export_csv() -> _J2Response:
 
 
 @app.get("/api/j2/live")  # type: ignore[name-defined]
-def api_j2_live_alias(aoi: str = _J2_DEFAULT_AOI, collection_ids: str | None = None) -> dict[str, _J2Any]:
-    return api_j2_report(aoi=aoi, collection_ids=collection_ids, live=True, force=True)
+def api_j2_live_alias(aoi: str = _J2_DEFAULT_AOI, collection_ids: str | None = None, date_from: str | None = None) -> dict[str, _J2Any]:
+    return api_j2_report(aoi=aoi, collection_ids=collection_ids, live=True, force=True, date_from=date_from)
 
 
 @app.get("/api/j2/summary")  # type: ignore[name-defined]
-def api_j2_summary_alias(aoi: str = _J2_DEFAULT_AOI, collection_ids: str | None = None) -> dict[str, _J2Any]:
-    return api_j2_report(aoi=aoi, collection_ids=collection_ids, live=False, force=False)
+def api_j2_summary_alias(aoi: str = _J2_DEFAULT_AOI, collection_ids: str | None = None, date_from: str | None = None) -> dict[str, _J2Any]:
+    return api_j2_report(aoi=aoi, collection_ids=collection_ids, live=False, force=False, date_from=date_from)
 
 # ---- end LANTERN v0.11.3 J2 Live Article Rotator API ----
 
@@ -6166,27 +6845,28 @@ def _j2hf_query_terms(aoi: str) -> list[str]:
     base = (aoi or _J2HF_DEFAULT_AOI).strip()
     if _j2_is_uk_aoi(base):
         return [
-            f"{base} aviation security GNSS RF interference",
-            f"{base} Lincolnshire police aviation airport security",
-            f"{base} communications outage RF interference",
-            f"{base} drone airport disruption security",
-            "United Kingdom GNSS GPS interference aviation security",
+            f'"{base}" (aviation OR airport OR airspace) (security OR disruption OR NOTAM)',
+            f'"{base}" (GNSS OR GPS OR RF OR VHF) (interference OR jamming OR spoofing)',
+            f'"{base}" Lincolnshire police aviation airport security',
+            f'"{base}" (drone OR UAS) airport disruption security',
+            '"United Kingdom" GNSS GPS interference aviation security',
         ]
     return [
-        f"Al-Shabaab Somalia Mogadishu Aden Adde security aviation {base}",
-        f"ISIS-Somalia OR Islamic State Somalia Puntland Mogadishu {base}",
-        f"Somalia Mogadishu airport security Al-Shabaab ISIS {base}",
-        f"Somalia conflict zone aviation Mogadishu FIR Al-Shabaab {base}",
+        f'"{base}" (Al-Shabaab OR Shabaab) Somalia Mogadishu aviation security',
+        f'"{base}" (ISIS-Somalia OR "Islamic State Somalia" OR Daesh) Puntland Mogadishu',
+        f'"{base}" Somalia Mogadishu airport security Al-Shabaab ISIS',
+        '"Mogadishu FIR" Somalia conflict aviation Al-Shabaab security',
     ]
 
 
-def _j2hf_google_news_rss_url(query: str) -> str:
-    q = _j2hf_urlparse.quote(query)
+def _j2hf_google_news_rss_url(query: str, date_from: str | None = None) -> str:
+    query_text = f"{query} after:{date_from}" if date_from else query
+    q = _j2hf_urlparse.quote(query_text)
     return f"https://news.google.com/rss/search?q={q}&hl=en-GB&gl=GB&ceid=GB:en"
 
 
-def _j2hf_fetch_news_rss(query: str, limit: int = 10) -> list[dict[str, _J2HFAny]]:
-    url = _j2hf_google_news_rss_url(query)
+def _j2hf_fetch_news_rss(query: str, limit: int = 10, date_from: str | None = None) -> list[dict[str, _J2HFAny]]:
+    url = _j2hf_google_news_rss_url(query, date_from=date_from)
     req = _j2hf_urlrequest.Request(url, headers={"User-Agent": "EEI-LANTERN-J2/0.11.4a"})
     try:
         with _j2hf_urlrequest.urlopen(req, timeout=8) as resp:
@@ -6204,18 +6884,26 @@ def _j2hf_fetch_news_rss(query: str, limit: int = 10) -> list[dict[str, _J2HFAny
         pub = _j2hf_pub_to_iso(item.findtext("pubDate"))
         source_el = item.find("source")
         source = _j2hf_clean_text(source_el.text if source_el is not None else "Google News")
-        desc = _j2hf_clean_text(item.findtext("description"))
+        desc_raw = item.findtext("description")
+        desc = _j2hf_clean_text(desc_raw)
+        source_url = _j2_http_url(source_el.attrib.get("url") if source_el is not None else None)
+        image_url = _j2_rss_image_url(item, desc_raw)
+        source_icon_url = _j2_source_icon_url(source_url or link)
         if not title or not link:
             continue
         out.append({
             "title": title,
             "source": source or "Google News",
+            "source_url": source_url,
             "url": link,
             "published_utc": pub,
             "category": _j2hf_category_for_text(title + " " + desc),
             "confidence": "live-news",
             "summary": desc[:360] if desc else "Live news/search result. Verify source details before briefing.",
+            "image_url": image_url,
+            "source_icon_url": source_icon_url,
             "aoi": query,
+            "query": f"{query} after:{date_from}" if date_from else query,
             "live": True,
         })
         if len(out) >= int(limit):
@@ -6236,15 +6924,15 @@ def _j2hf_category_for_text(text: str) -> str:
     return "Security / Regional"
 
 
-def _j2hf_existing_news(aoi: str, live: bool, force: bool, limit: int) -> list[dict[str, _J2HFAny]]:
+def _j2hf_existing_news(aoi: str, live: bool, force: bool, limit: int, date_from: str | None = None) -> list[dict[str, _J2HFAny]]:
     fn = globals().get("api_j2_news")
     if callable(fn):
         try:
-            payload = fn(aoi=aoi, live=live, force=force, limit=limit)  # type: ignore[misc]
+            payload = fn(aoi=aoi, live=live, force=force, limit=limit, date_from=date_from)  # type: ignore[misc]
             return list(payload.get("articles") or [])
         except TypeError:
             try:
-                payload = fn(live=live, force=force, limit=limit)  # type: ignore[misc]
+                payload = fn(live=live, force=force, limit=limit, date_from=date_from)  # type: ignore[misc]
                 return list(payload.get("articles") or [])
             except Exception:
                 return []
@@ -6253,10 +6941,21 @@ def _j2hf_existing_news(aoi: str, live: bool, force: bool, limit: int) -> list[d
     return []
 
 
-def _j2hf_dedupe(items: list[dict[str, _J2HFAny]], limit: int) -> list[dict[str, _J2HFAny]]:
+def _j2hf_dedupe(items: list[dict[str, _J2HFAny]], limit: int, aoi: str = _J2HF_DEFAULT_AOI, date_from: str | None = None) -> list[dict[str, _J2HFAny]]:
+    since = _j2_parse_date_from(date_from)
+    ranked: list[dict[str, _J2HFAny]] = []
+    for item in items:
+        if not isinstance(item, dict) or not _j2_date_allowed(item, since):  # type: ignore[arg-type]
+            continue
+        copied = dict(item)
+        if not copied.get("source_icon_url"):
+            copied["source_icon_url"] = _j2_source_icon_url(str(copied.get("source_url") or copied.get("url") or ""))
+        copied["relevance_score"] = _j2_relevance_score(copied, aoi, since)  # type: ignore[arg-type]
+        ranked.append(copied)
+    ranked.sort(key=lambda x: (int(x.get("relevance_score") or 0), str(x.get("published_utc") or "")), reverse=True)
     seen: set[str] = set()
     out: list[dict[str, _J2HFAny]] = []
-    for item in items:
+    for item in ranked:
         url = str(item.get("url") or "").strip()
         title = _j2hf_clean_text(item.get("title"))
         key = (url or title).lower()
@@ -6273,13 +6972,14 @@ def _j2hf_dedupe(items: list[dict[str, _J2HFAny]], limit: int) -> list[dict[str,
     return out
 
 
-def _j2hf_threat_articles(aoi: str, live: bool, force: bool, limit: int) -> list[dict[str, _J2HFAny]]:
+def _j2hf_threat_articles(aoi: str, live: bool, force: bool, limit: int, date_from: str | None = None) -> list[dict[str, _J2HFAny]]:
+    date_from_key = _j2_date_from_key(date_from)
     live_items: list[dict[str, _J2HFAny]] = []
     if live:
         per_query = max(4, min(12, int(limit) // 3))
         for query in _j2hf_query_terms(aoi):
-            live_items.extend(_j2hf_fetch_news_rss(query, limit=per_query))
-    existing = _j2hf_existing_news(aoi, live, force, max(int(limit), 20))
+            live_items.extend(_j2hf_fetch_news_rss(query, limit=per_query, date_from=date_from_key))
+    existing = _j2hf_existing_news(aoi, live, force, max(int(limit), 20), date_from=date_from_key)
     threatish_existing = []
     for item in existing:
         text = " ".join(str(item.get(k) or "") for k in ("title", "summary", "category", "source"))
@@ -6288,7 +6988,7 @@ def _j2hf_threat_articles(aoi: str, live: bool, force: bool, limit: int) -> list
             copied = dict(item)
             copied["category"] = cat if copied.get("category") in (None, "", "Security / Regional") else copied.get("category")
             threatish_existing.append(copied)
-    return _j2hf_dedupe(live_items + threatish_existing + _j2hf_source_register(aoi), limit=max(int(limit), 8))
+    return _j2hf_dedupe(live_items + threatish_existing + _j2hf_source_register(aoi), limit=max(int(limit), 8), aoi=aoi, date_from=date_from_key)
 
 
 def _j2hf_actor_catalog(aoi: str) -> list[dict[str, _J2HFAny]]:
@@ -6389,9 +7089,10 @@ def _j2hf_actor_catalog(aoi: str) -> list[dict[str, _J2HFAny]]:
     ]
 
 
-def _j2hf_payload(aoi: str, live: bool, force: bool, limit: int) -> dict[str, _J2HFAny]:
+def _j2hf_payload(aoi: str, live: bool, force: bool, limit: int, date_from: str | None = None) -> dict[str, _J2HFAny]:
     aoi = mission_aoi_query_text(aoi, default=_J2HF_DEFAULT_AOI)
-    articles = _j2hf_threat_articles(aoi, live, force, limit)
+    date_from_key = _j2_date_from_key(date_from)
+    articles = _j2hf_threat_articles(aoi, live, force, limit, date_from=date_from_key)
     live_count = sum(1 for a in articles if bool(a.get("live")))
     actors = _j2hf_actor_catalog(aoi)
     al_count = sum(1 for a in articles if "shabaab" in str(a.get("title", "") + " " + a.get("summary", "")).lower())
@@ -6433,6 +7134,7 @@ def _j2hf_payload(aoi: str, live: bool, force: bool, limit: int) -> dict[str, _J
         "j2_api_version": _J2HF_VERSION,
         "generated_utc": _j2hf_now(),
         "aoi": aoi,
+        "date_from": date_from_key,
         "confidence": confidence,
         "live_attempted": bool(live),
         "live_count": live_count,
@@ -6448,6 +7150,8 @@ def _j2hf_payload(aoi: str, live: bool, force: bool, limit: int) -> dict[str, _J
                 "category": a.get("category"),
                 "confidence": a.get("confidence"),
                 "published_utc": a.get("published_utc"),
+                "query": a.get("query"),
+                "relevance_score": a.get("relevance_score"),
                 "live": bool(a.get("live")),
             }
             for a in articles
@@ -6468,8 +7172,9 @@ def api_j2_threat_actors_hotfix(
     live: bool = True,
     force: bool = False,
     limit: int = _J2HFQuery(default=30, ge=1, le=80),
+    date_from: str | None = None,
 ) -> dict[str, _J2HFAny]:
-    return _j2hf_payload(aoi=aoi, live=bool(live), force=bool(force), limit=int(limit))
+    return _j2hf_payload(aoi=aoi, live=bool(live), force=bool(force), limit=int(limit), date_from=date_from)
 
 
 @app.get("/api/j2/threat_actors")  # type: ignore[name-defined]
@@ -6478,8 +7183,9 @@ def api_j2_threat_actors_hotfix_alias(
     live: bool = True,
     force: bool = False,
     limit: int = _J2HFQuery(default=30, ge=1, le=80),
+    date_from: str | None = None,
 ) -> dict[str, _J2HFAny]:
-    return api_j2_threat_actors_hotfix(aoi=aoi, live=live, force=force, limit=limit)
+    return api_j2_threat_actors_hotfix(aoi=aoi, live=live, force=force, limit=limit, date_from=date_from)
 
 
 @app.get("/api/j2/threat-news")  # type: ignore[name-defined]
@@ -6488,8 +7194,9 @@ def api_j2_threat_news_hotfix(
     live: bool = True,
     force: bool = False,
     limit: int = _J2HFQuery(default=30, ge=1, le=80),
+    date_from: str | None = None,
 ) -> dict[str, _J2HFAny]:
-    payload = api_j2_threat_actors_hotfix(aoi=aoi, live=live, force=force, limit=limit)
+    payload = api_j2_threat_actors_hotfix(aoi=aoi, live=live, force=force, limit=limit, date_from=date_from)
     return {
         "status": "ok",
         "j2_api_version": _J2HF_VERSION,
@@ -6572,8 +7279,8 @@ def _j2_status_payload() -> dict[str, _J2StatusAny]:
         "routes": route_checks,
         "urls": {
             "platform_home": "/app?v=0116",
-            "j2_live_report": "/static/j2_report.html?v=115",
-            "j2_static": "/static/j2_report.html?v=115",
+            "j2_live_report": "/static/j2_report.html?v=118",
+            "j2_static": "/static/j2_report.html?v=118",
             "j2_news_api": "/api/j2/news?live=true&force=true",
             "j2_threat_actor_api": "/api/j2/threat-actors?live=true&force=true",
             "legacy_rotator": "not used",
@@ -6622,10 +7329,24 @@ def _v012_static_dir() -> _V012Path:
         return _V012Path(__file__).with_name("static")
 
 
+
+def _v012_with_early_shell(html: str) -> str:
+    """Mount the global shell before page content on canonical HTML routes."""
+    if "data-eei-shell-early" in html:
+        return html
+    lower = html.lower()
+    body_idx = lower.find("<body")
+    if body_idx < 0:
+        return html
+    end_idx = html.find(">", body_idx)
+    if end_idx < 0:
+        return html
+    early = '<script data-eei-shell-early src="/static/platform_shell.js?v=0134"></script>'
+    return html[: end_idx + 1] + early + html[end_idx + 1 :]
 def _v012_static_page(name: str, fallback_title: str = "LANTERN") -> str:
     p = _v012_static_dir() / name
     if p.exists():
-        return p.read_text(encoding="utf-8", errors="replace")
+        return _v012_with_early_shell(p.read_text(encoding="utf-8", errors="replace"))
     return f"""<!doctype html><html><head><meta charset='utf-8'><title>{fallback_title}</title></head><body><h1>{fallback_title}</h1><p>Missing static page: {name}</p><p><a href='/app?v=0122'>Return to LANTERN Home</a></p></body></html>"""
 
 
@@ -6659,8 +7380,8 @@ def _v012_frame_page(title: str, source_url: str, nav_group: str) -> str:
         legacy_kind = "flight-safety"
     mode_meta = {
         "survey-map": {
-            "title": "Survey Map / H3",
-            "summary": "AOI, H3 cells, RF burden and raw spatial evidence",
+            "title": "Survey Map",
+            "summary": "AOI, H3 cells, RF burden and raw survey evidence",
             "chips": ["AOI", "H3", "RF burden"],
         },
         "candidate-map": {
@@ -6677,7 +7398,7 @@ def _v012_frame_page(title: str, source_url: str, nav_group: str) -> str:
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>{safe_title}</title>
-<link rel="stylesheet" href="/static/platform_shell.css?v=0127" />
+<link rel="stylesheet" href="/static/platform_shell.css?v=0134" />
 <style>
 html,body{{margin:0;height:100%;overflow:hidden;background:#151b22}}
 body[data-lantern-wrapper="true"]{{display:flex;flex-direction:column;min-height:100vh}}
@@ -6691,6 +7412,7 @@ body[data-lantern-wrapper="true"]{{display:flex;flex-direction:column;min-height
 .eei-map-mode-strip.eei-candidate-map{{border-left:5px solid #9b5cff;background:linear-gradient(90deg,#241b34,#17202a)}}
 </style>
 </head><body data-lantern-wrapper="true" data-nav-group="{nav_group}" data-legacy-kind="{legacy_kind}">
+<script data-eei-shell-early src="/static/platform_shell.js?v=0134"></script>
 <noscript><div class="noscript">JavaScript is required for the LANTERN platform shell. Open the legacy page directly: <a href="{src}">{safe_title}</a></div></noscript>
 {mode_strip}
 <main class="eei-frame-stage" aria-label="{safe_title}">
@@ -6756,9 +7478,510 @@ body[data-lantern-wrapper="true"]{{display:flex;flex-direction:column;min-height
   }});
 }})();
 </script>
-<script src="/static/platform_shell.js?v=0127" defer></script>
+<script src="/static/platform_shell.js?v=0134" defer></script>
 </body></html>"""
 
+
+# ---- LANTERN operational launch/jamming reporting endpoints ----
+# Fast SQL summaries for reporting pages. These avoid the heavier analyst row scans.
+def _lantern_op_utc(value: str | None, *, end: bool = False) -> str | None:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if len(text) == 16 and "T" in text:
+        return f"{text}:{'59' if end else '00'}Z"
+    if len(text) == 19 and "T" in text and not text.endswith("Z"):
+        return f"{text}Z"
+    return text
+
+
+def _lantern_op_ids(collection_id: int | None = None, collection_ids: str | None = None) -> list[int]:
+    try:
+        return _moth_adv_parse_ids(collection_id, collection_ids)
+    except Exception:
+        return parse_collection_ids(collection_id, collection_ids)
+
+
+def _lantern_op_where(
+    *,
+    collection_id: int | None = None,
+    collection_ids: str | None = None,
+    start_utc: str | None = None,
+    end_utc: str | None = None,
+    include_time_anomalies: bool = False,
+) -> tuple[list[str], list[Any], list[int]]:
+    ids = _lantern_op_ids(collection_id, collection_ids)
+    where = ["valid = 1", "timestamp_utc IS NOT NULL", "frequency_hz IS NOT NULL", "strength_dbm IS NOT NULL"]
+    params: list[Any] = []
+    if ids:
+        placeholders = ",".join("?" for _ in ids)
+        where.append(f"collection_id IN ({placeholders})")
+        params.extend(ids)
+    start = _lantern_op_utc(start_utc)
+    end = _lantern_op_utc(end_utc, end=True)
+    if start:
+        where.append("timestamp_utc >= ?")
+        params.append(start)
+    if end:
+        where.append("timestamp_utc <= ?")
+        params.append(end)
+    if not include_time_anomalies:
+        where.append("timestamp_utc >= ?")
+        params.append(_MOTH_ADV_TIMELINE_MIN_UTC)
+        where.append("timestamp_utc <= ?")
+        params.append(_MOTH_ADV_TIMELINE_MAX_UTC)
+    return where, params, ids
+
+
+def _lantern_op_anomaly_summary(conn, ids: list[int]) -> dict[str, Any]:
+    where = ["valid = 1", "(timestamp_utc IS NULL OR timestamp_utc < ? OR timestamp_utc > ?)"]
+    params: list[Any] = [_MOTH_ADV_TIMELINE_MIN_UTC, _MOTH_ADV_TIMELINE_MAX_UTC]
+    if ids:
+        placeholders = ",".join("?" for _ in ids)
+        where.append(f"collection_id IN ({placeholders})")
+        params.extend(ids)
+    sql_where = " AND ".join(where)
+    count = int(conn.execute(f"SELECT COUNT(*) FROM moth_events WHERE {sql_where}", params).fetchone()[0] or 0)
+    samples = rows_to_dicts(conn.execute(
+        f"""
+        SELECT COALESCE(timestamp_utc, '<missing>') AS timestamp_utc, COUNT(*) AS event_count
+        FROM moth_events
+        WHERE {sql_where}
+        GROUP BY COALESCE(timestamp_utc, '<missing>')
+        ORDER BY event_count DESC
+        LIMIT 5
+        """,
+        params,
+    ).fetchall())
+    return {"count": count, "samples": samples, "filter_min_utc": _MOTH_ADV_TIMELINE_MIN_UTC, "filter_max_utc": _MOTH_ADV_TIMELINE_MAX_UTC}
+
+
+def _lantern_op_collection_summary(conn, ids: list[int]) -> dict[str, Any]:
+    where = []
+    params: list[Any] = []
+    if ids:
+        placeholders = ",".join("?" for _ in ids)
+        where.append(f"collection_id IN ({placeholders})")
+        params.extend(ids)
+    sql_where = " WHERE " + " AND ".join(where) if where else ""
+    row = conn.execute(
+        f"""
+        SELECT COUNT(*) AS collection_count,
+               SUM(row_count) AS row_count,
+               SUM(valid_event_count) AS valid_event_count,
+               SUM(invalid_event_count) AS invalid_event_count,
+               MIN(collection_start_utc) AS collection_start_utc,
+               MAX(collection_end_utc) AS collection_end_utc,
+               MAX(upload_time_utc) AS latest_upload_utc
+        FROM moth_collections{sql_where}
+        """,
+        params,
+    ).fetchone()
+    return dict(row) if row else {}
+
+
+def _lantern_op_band_summary(conn, sql_where: str, params: list[Any], spike_dbm: float, width_mhz: float) -> list[dict[str, Any]]:
+    rows = []
+    for band, (lo, hi, centre) in _moth_adv_gnss_edges(float(width_mhz)).items():
+        row = conn.execute(
+            f"""
+            SELECT COUNT(*) AS event_count,
+                   SUM(CASE WHEN strength_dbm >= ? THEN 1 ELSE 0 END) AS strong_spike_count,
+                   MAX(strength_dbm) AS max_dbm,
+                   AVG(strength_dbm) AS avg_dbm,
+                   MIN(timestamp_utc) AS first_utc,
+                   MAX(timestamp_utc) AS last_utc,
+                   COUNT(DISTINCT collection_id) AS collection_count
+            FROM moth_events
+            WHERE {sql_where} AND frequency_hz >= ? AND frequency_hz <= ?
+            """,
+            [float(spike_dbm)] + list(params) + [float(lo), float(hi)],
+        ).fetchone()
+        data = dict(row) if row else {}
+        event_count = int(data.get("event_count") or 0)
+        strong_count = int(data.get("strong_spike_count") or 0)
+        burden = min(100.0, (event_count / 250.0) + (strong_count * 4.0))
+        clearance = max(0.0, 100.0 - burden)
+        rows.append({
+            "band": band,
+            "center_hz": centre,
+            "min_hz": lo,
+            "max_hz": hi,
+            "event_count": event_count,
+            "strong_spike_count": strong_count,
+            "max_dbm": data.get("max_dbm"),
+            "avg_dbm": data.get("avg_dbm"),
+            "first_utc": data.get("first_utc"),
+            "last_utc": data.get("last_utc"),
+            "collection_count": int(data.get("collection_count") or 0),
+            "clearance_score": round(clearance, 1),
+            "burden_score": round(burden, 1),
+        })
+    return sorted(rows, key=lambda r: (r["strong_spike_count"], r["event_count"], -r["clearance_score"]))
+
+
+def _lantern_op_band_range_summary(conn, sql_where: str, params: list[Any], min_hz: float | None, max_hz: float | None, spike_dbm: float) -> dict[str, Any] | None:
+    if min_hz is None or max_hz is None:
+        return None
+    row = conn.execute(
+        f"""
+        SELECT COUNT(*) AS event_count,
+               SUM(CASE WHEN strength_dbm >= ? THEN 1 ELSE 0 END) AS strong_spike_count,
+               MAX(strength_dbm) AS max_dbm,
+               AVG(strength_dbm) AS avg_dbm,
+               MIN(timestamp_utc) AS first_utc,
+               MAX(timestamp_utc) AS last_utc,
+               COUNT(DISTINCT collection_id) AS collection_count
+        FROM moth_events
+        WHERE {sql_where} AND frequency_hz >= ? AND frequency_hz <= ?
+        """,
+        [float(spike_dbm)] + list(params) + [float(min_hz), float(max_hz)],
+    ).fetchone()
+    data = dict(row) if row else {}
+    data.update({"configured": True, "min_hz": min_hz, "max_hz": max_hz})
+    data["event_count"] = int(data.get("event_count") or 0)
+    data["strong_spike_count"] = int(data.get("strong_spike_count") or 0)
+    data["collection_count"] = int(data.get("collection_count") or 0)
+    return data
+
+
+def _lantern_op_top_spikes(conn, sql_where: str, params: list[Any], spike_dbm: float, limit: int = 8) -> list[dict[str, Any]]:
+    return rows_to_dicts(conn.execute(
+        f"""
+        SELECT CAST(frequency_hz / 1000000.0 AS INTEGER) AS freq_bin_mhz,
+               COUNT(*) AS event_count,
+               MAX(strength_dbm) AS max_dbm,
+               AVG(strength_dbm) AS avg_dbm,
+               MIN(timestamp_utc) AS first_utc,
+               MAX(timestamp_utc) AS last_utc,
+               COUNT(DISTINCT collection_id) AS collection_count
+        FROM moth_events
+        WHERE {sql_where} AND strength_dbm >= ?
+        GROUP BY CAST(frequency_hz / 1000000.0 AS INTEGER)
+        ORDER BY event_count DESC, max_dbm DESC
+        LIMIT ?
+        """,
+        list(params) + [float(spike_dbm), int(limit)],
+    ).fetchall())
+
+
+def _lantern_op_source_hints(conn, sql_where: str, params: list[Any], spike_dbm: float, limit: int = 5) -> list[dict[str, Any]]:
+    return rows_to_dicts(conn.execute(
+        f"""
+        SELECT substr(timestamp_utc, 1, 16) AS minute_utc,
+               COUNT(*) AS event_count,
+               COUNT(DISTINCT collection_id) AS receiver_count,
+               MAX(strength_dbm) AS max_dbm,
+               MIN(lat) AS min_lat,
+               MAX(lat) AS max_lat,
+               MIN(lon) AS min_lon,
+               MAX(lon) AS max_lon
+        FROM moth_events
+        WHERE {sql_where} AND strength_dbm >= ?
+        GROUP BY substr(timestamp_utc, 1, 16)
+        HAVING receiver_count >= 2
+        ORDER BY receiver_count DESC, event_count DESC, max_dbm DESC
+        LIMIT ?
+        """,
+        list(params) + [float(spike_dbm), int(limit)],
+    ).fetchall())
+
+
+def _lantern_op_quality_level() -> dict[str, Any]:
+    try:
+        q = get_latest_quality_summary(DB_PATH)
+        latest = q.get("latest") if isinstance(q, dict) else None
+        if not latest:
+            return {"level": "NO DATA", "latest": None, "message": q.get("message") if isinstance(q, dict) else None}
+        raw = int(latest.get("raw_rows") or 0)
+        rejected = int(latest.get("rejected_rows") or 0)
+        flagged = int(latest.get("flagged_rows") or 0)
+        if raw <= 0:
+            level = "NO DATA"
+        elif rejected == 0 and flagged == 0:
+            level = "GOOD"
+        elif rejected <= max(10, raw * 0.05):
+            level = "CHECK"
+        else:
+            level = "LOW"
+        return {"level": level, "latest": latest, "message": q.get("message") if isinstance(q, dict) else None}
+    except Exception as exc:
+        return {"level": "CHECK", "latest": None, "error": str(exc)}
+
+
+def _lantern_op_sensor_posture() -> dict[str, Any]:
+    try:
+        data = sensor_status(db_path=DB_PATH)
+        latest = data.get("latest_session") or {}
+        gps_fix = int(latest.get("gps_fix_type") or 0)
+        lat = float(latest.get("last_lat") or 0.0)
+        lon = float(latest.get("last_lon") or 0.0)
+        usable = bool(data.get("session_count")) and gps_fix >= 2 and not (abs(lat) < 0.000001 and abs(lon) < 0.000001)
+        state = "LIVE USABLE" if usable else "CHECK SENSOR"
+        if not data.get("session_count"):
+            state = "NO LIVE SENSOR"
+        return {"state": state, "usable": usable, "status": data}
+    except Exception as exc:
+        return {"state": "CHECK SENSOR", "usable": False, "error": str(exc)}
+
+
+def _lantern_op_status_from_metrics(total_sane: int, gnss_events: int, strong_gnss: int, source_hint_count: int, anomaly_count: int, quality_level: str, link: dict[str, Any] | None) -> tuple[str, str, int, list[str], list[str]]:
+    holds: list[str] = []
+    checks: list[str] = []
+    if total_sane <= 0:
+        holds.append("No mission-time RF events are available after timestamp sanity filtering.")
+    elif total_sane < 50:
+        checks.append("Very little mission-time RF evidence is available.")
+    if strong_gnss >= 10:
+        holds.append(f"{strong_gnss} strong GNSS-window detections meet or exceed the spike threshold.")
+    elif strong_gnss > 0:
+        checks.append(f"{strong_gnss} strong GNSS-window detections meet or exceed the spike threshold.")
+    if source_hint_count > 0:
+        checks.append("Concurrent strong detections across more than one collection suggest source-location review is relevant.")
+    if anomaly_count > 0:
+        checks.append(f"{anomaly_count} timestamp-anomaly rows were excluded from the operational readout.")
+    if quality_level in {"LOW", "NO DATA"}:
+        checks.append(f"Data quality is {quality_level}; review Data Quality before customer release.")
+    if link and int(link.get("strong_spike_count") or 0) > 0:
+        holds.append("The configured UAS link band has strong detections in the current filter.")
+    score = 100
+    score -= min(35, strong_gnss * 2)
+    score -= min(25, int(gnss_events / 1000))
+    score -= min(15, source_hint_count * 5)
+    score -= 10 if anomaly_count else 0
+    score -= 10 if quality_level == "LOW" else 0
+    if link and int(link.get("strong_spike_count") or 0) > 0:
+        score -= 20
+    score = max(0, min(100, score))
+    if holds:
+        return "RF HOLD RECOMMENDED", "bad", score, holds, checks
+    if checks or score < 70:
+        return "RF CHECK REQUIRED", "check", score, holds, checks
+    return "RF SUPPORTS LAUNCH", "good", score, holds, checks
+
+
+def _lantern_build_launch_readiness_payload(
+    *,
+    collection_id: int | None = None,
+    collection_ids: str | None = None,
+    start_utc: str | None = None,
+    end_utc: str | None = None,
+    spike_dbm: float = -60.0,
+    width_mhz: float = 40.0,
+    link_min_hz: float | None = None,
+    link_max_hz: float | None = None,
+    include_time_anomalies: bool = False,
+) -> dict[str, Any]:
+    where, params, ids = _lantern_op_where(
+        collection_id=collection_id,
+        collection_ids=collection_ids,
+        start_utc=start_utc,
+        end_utc=end_utc,
+        include_time_anomalies=include_time_anomalies,
+    )
+    sql_where = " AND ".join(where)
+    conn = connect()
+    try:
+        totals_row = conn.execute(
+            f"""
+            SELECT COUNT(*) AS event_count,
+                   COUNT(DISTINCT collection_id) AS collection_count,
+                   MIN(timestamp_utc) AS first_utc,
+                   MAX(timestamp_utc) AS last_utc,
+                   MIN(lat) AS min_lat,
+                   MAX(lat) AS max_lat,
+                   MIN(lon) AS min_lon,
+                   MAX(lon) AS max_lon
+            FROM moth_events
+            WHERE {sql_where}
+            """,
+            params,
+        ).fetchone()
+        totals = dict(totals_row) if totals_row else {}
+        totals["event_count"] = int(totals.get("event_count") or 0)
+        totals["collection_count"] = int(totals.get("collection_count") or 0)
+        collections = _lantern_op_collection_summary(conn, ids)
+        anomalies = _lantern_op_anomaly_summary(conn, ids)
+        bands = _lantern_op_band_summary(conn, sql_where, params, spike_dbm, width_mhz)
+        top_spikes = _lantern_op_top_spikes(conn, sql_where, params, spike_dbm)
+        source_hints = _lantern_op_source_hints(conn, sql_where, params, spike_dbm)
+        link = _lantern_op_band_range_summary(conn, sql_where, params, link_min_hz, link_max_hz, spike_dbm)
+    finally:
+        conn.close()
+    quality = _lantern_op_quality_level()
+    sensor = _lantern_op_sensor_posture()
+    gnss_events = sum(int(b.get("event_count") or 0) for b in bands)
+    strong_gnss = sum(int(b.get("strong_spike_count") or 0) for b in bands)
+    status, status_class, score, holds, checks = _lantern_op_status_from_metrics(
+        int(totals.get("event_count") or 0),
+        gnss_events,
+        strong_gnss,
+        len(source_hints),
+        int(anomalies.get("count") or 0),
+        str(quality.get("level") or "CHECK"),
+        link,
+    )
+    best_band = bands[0] if bands else None
+    affected = [b for b in bands if int(b.get("event_count") or 0) > 0 or int(b.get("strong_spike_count") or 0) > 0]
+    return {
+        "status": status,
+        "status_class": status_class,
+        "score_0_100": score,
+        "generated_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "filters": {
+            "collection_ids": ids,
+            "start_utc": _lantern_op_utc(start_utc),
+            "end_utc": _lantern_op_utc(end_utc, end=True),
+            "spike_dbm": spike_dbm,
+            "gnss_width_mhz": width_mhz,
+            "include_time_anomalies": include_time_anomalies,
+            "link_min_hz": link_min_hz,
+            "link_max_hz": link_max_hz,
+        },
+        "summary": {
+            "headline": status,
+            "recommendation": "Treat this as RF decision support only; final UAS launch authority remains outside LANTERN.",
+            "holds": holds,
+            "checks": checks,
+            "best_gnss_band": best_band,
+            "gnss_event_count": gnss_events,
+            "strong_gnss_spike_count": strong_gnss,
+            "source_hint_count": len(source_hints),
+        },
+        "totals": totals,
+        "collections": collections,
+        "data_quality": quality,
+        "time_anomalies": anomalies,
+        "sensor": sensor,
+        "gnss_bands": bands,
+        "affected_bands": affected,
+        "uas_link_band": link or {"configured": False, "message": "No UAS C2/telemetry/video link band configured for this run."},
+        "top_spikes": top_spikes,
+        "source_hints": source_hints,
+        "limitations": [
+            "MOTH logs detected RF events; quiet periods do not prove the absence of interference.",
+            "GNSS-window activity is RF survey evidence, not direct receiver integrity or aircraft navigation performance.",
+            "UAS launch decisions still require airspace, weather, aircraft, battery, crew and live receiver checks.",
+            "Timestamp anomalies are excluded by default from operational readouts and should be reviewed in Data Quality.",
+        ],
+    }
+
+
+@app.get("/api/reporting/launch-readiness")
+def lantern_reporting_launch_readiness(
+    collection_id: int | None = None,
+    collection_ids: str | None = None,
+    start_utc: str | None = None,
+    end_utc: str | None = None,
+    spike_dbm: float = Query(default=-60.0),
+    width_mhz: float = Query(default=40.0, ge=1.0, le=100.0),
+    link_min_hz: float | None = None,
+    link_max_hz: float | None = None,
+    include_time_anomalies: bool = False,
+) -> dict[str, Any]:
+    return _lantern_build_launch_readiness_payload(
+        collection_id=collection_id,
+        collection_ids=collection_ids,
+        start_utc=start_utc,
+        end_utc=end_utc,
+        spike_dbm=spike_dbm,
+        width_mhz=width_mhz,
+        link_min_hz=link_min_hz,
+        link_max_hz=link_max_hz,
+        include_time_anomalies=include_time_anomalies,
+    )
+
+
+@app.get("/api/reporting/jamming-report")
+def lantern_reporting_jamming_report(
+    collection_id: int | None = None,
+    collection_ids: str | None = None,
+    start_utc: str | None = None,
+    end_utc: str | None = None,
+    spike_dbm: float = Query(default=-60.0),
+    width_mhz: float = Query(default=40.0, ge=1.0, le=100.0),
+    link_min_hz: float | None = None,
+    link_max_hz: float | None = None,
+    include_time_anomalies: bool = False,
+) -> dict[str, Any]:
+    readiness = _lantern_build_launch_readiness_payload(
+        collection_id=collection_id,
+        collection_ids=collection_ids,
+        start_utc=start_utc,
+        end_utc=end_utc,
+        spike_dbm=spike_dbm,
+        width_mhz=width_mhz,
+        link_min_hz=link_min_hz,
+        link_max_hz=link_max_hz,
+        include_time_anomalies=include_time_anomalies,
+    )
+    strong_gnss = int((readiness.get("summary") or {}).get("strong_gnss_spike_count") or 0)
+    source_hints = int((readiness.get("summary") or {}).get("source_hint_count") or 0)
+    link = readiness.get("uas_link_band") or {}
+    link_strong = int(link.get("strong_spike_count") or 0) if link.get("configured") else 0
+    if strong_gnss >= 10 or link_strong > 0:
+        classification = "SUSPECTED JAMMING OR HARMFUL INTERFERENCE"
+        confidence = "MEDIUM" if source_hints or readiness.get("totals", {}).get("collection_count", 0) >= 2 else "LOW"
+    elif strong_gnss > 0 or source_hints:
+        classification = "RF INTERFERENCE INDICATOR"
+        confidence = "LOW-MEDIUM" if source_hints else "LOW"
+    elif int(readiness.get("totals", {}).get("event_count") or 0) <= 0:
+        classification = "INSUFFICIENT RF EVIDENCE"
+        confidence = "LOW"
+    else:
+        classification = "NO CURRENT JAMMING INDICATOR"
+        confidence = "LOW"
+    affected = []
+    for band in readiness.get("affected_bands") or []:
+        affected.append({
+            "service": f"GNSS {band.get('band')}",
+            "event_count": band.get("event_count"),
+            "strong_spike_count": band.get("strong_spike_count"),
+            "max_dbm": band.get("max_dbm"),
+            "frequency_range_hz": [band.get("min_hz"), band.get("max_hz")],
+        })
+    if link.get("configured"):
+        affected.append({
+            "service": "Configured UAS link band",
+            "event_count": link.get("event_count"),
+            "strong_spike_count": link.get("strong_spike_count"),
+            "max_dbm": link.get("max_dbm"),
+            "frequency_range_hz": [link.get("min_hz"), link.get("max_hz")],
+        })
+    actions = [
+        "Compare with aircraft GNSS/C2 telemetry, independent receiver checks and pilot/operator symptoms.",
+        "If launch is not time-critical, delay until a quieter RF window or collect another live MOTH/RF Explorer pass.",
+        "Open Likely Source Heat Map when concurrent strong detections are present.",
+        "Record exact UTC time, aircraft state, receiver symptoms, antenna positions and mitigation taken.",
+    ]
+    return {
+        "status": "ok",
+        "generated_utc": readiness.get("generated_utc"),
+        "classification": classification,
+        "confidence": confidence,
+        "readiness_status": readiness.get("status"),
+        "score_0_100": readiness.get("score_0_100"),
+        "affected_services": affected,
+        "narrative": {
+            "summary": f"{classification}. LANTERN observed {strong_gnss} strong GNSS-window detections and {source_hints} concurrent-source indicators under the active filters.",
+            "operational_effect": "Potential effect is reduced GNSS/C2 confidence for UAS launch planning. This report is evidence support, not a regulatory or airworthiness determination.",
+            "confidence_basis": "Confidence is based on event count, spike strength, timestamp sanity, collection overlap and configured link-band evidence.",
+        },
+        "evidence": {
+            "filters": readiness.get("filters"),
+            "totals": readiness.get("totals"),
+            "data_quality": readiness.get("data_quality"),
+            "time_anomalies": readiness.get("time_anomalies"),
+            "top_spikes": readiness.get("top_spikes"),
+            "source_hints": readiness.get("source_hints"),
+            "gnss_bands": readiness.get("gnss_bands"),
+            "sensor": readiness.get("sensor"),
+        },
+        "actions": actions,
+        "limitations": readiness.get("limitations"),
+    }
 def _v012_route_exists(path: str) -> bool:
     try:
         return any(getattr(route, "path", None) == path for route in app.routes)  # type: ignore[name-defined]
@@ -6772,9 +7995,9 @@ def _v012_page_exists(url: str) -> bool:
     if url.startswith("/api/"):
         return True
     path = url.split("?", 1)[0]
-    if path in {"/", "/app", "/context", "/reporting", "/engineering", "/system"}:
+    if path in {"/", "/app", "/context", "/ingest", "/reporting", "/engineering", "/system"}:
         return True
-    if path.startswith("/reporting/") or path.startswith("/engineering/") or path.startswith("/system/"):
+    if path.startswith("/ingest/") or path.startswith("/reporting/") or path.startswith("/engineering/") or path.startswith("/system/"):
         return True
     if path.startswith("/static/"):
         return (_v012_static_dir() / path.replace("/static/", "", 1)).exists()
@@ -6787,15 +8010,23 @@ def _v012_nav_registry() -> dict[str, _V012Any]:
     primary = [
         {"key": "home", "title": "Home", "url": "/app?v=0122", "description": "Platform landing page and workflow map."},
         {"key": "context", "title": "Mission Context", "url": "/context?v=0122", "description": "AOI, collections, time window and data quality status."},
+        {"key": "ingest", "title": "Ingest", "url": "/ingest?v=0122", "description": "Sensor acquisition, CSV upload, raw-message capture and parser diagnostics."},
         {"key": "reporting", "title": "Reporting", "url": "/reporting?v=0122", "description": "End-state flight safety, operations, J2 and export pages."},
-        {"key": "engineering", "title": "Engineering", "url": "/engineering?v=0122", "description": "Technical evidence, RF analysis, map layers and diagnostics."},
-        {"key": "system", "title": "System", "url": "/system?v=0122", "description": "Health, deployment checks, logs and app map."},
+        {"key": "engineering", "title": "Engineering", "url": "/engineering?v=0122", "description": "RF analysis, map layers, candidate evidence and analyst tools."},
+        {"key": "system", "title": "System", "url": "/system?v=0122", "description": "Health, deployment checks, logs, app map and back-office support."},
     ]
     sections = {
+        "ingest": [
+            {"key": "data-upload", "title": "Data Upload", "url": "/ingest/upload?v=0122", "description": "Historic CSV upload, live-mode entry and future mapping/elevation data entry point."},
+            {"key": "live-sensors", "title": "Live Sensors", "url": "/ingest/live-sensors?v=0122", "description": "MOTH SDK sessions, raw message archive, normalised RF events and RF Explorer readiness."},
+            {"key": "imports", "title": "Import Diagnostics", "url": "/ingest/import-diagnostics?v=0122", "description": "CSV parser status, quality mode, source file notes and ingest troubleshooting."},
+        ],
         "reporting": [
-            {"key": "flight-safety", "title": "Flight Safety Brief", "url": "/reporting/flight-safety?v=0122", "legacy_url": "/lantern?v=0122", "description": "Pilot-facing GNSS/RF burden and clearest observed constellation/band."},
-            {"key": "mission-brief", "title": "Mission Operations Brief", "url": "/reporting/mission-brief?v=0122", "legacy_url": "/static/mission_brief.html?v=092", "description": "Senior/ops readiness summary, caveats and decision-support brief."},
-            {"key": "j2", "title": "J2 Live Report", "url": "/reporting/j2?v=0122", "legacy_url": "/static/j2_report.html?v=115", "description": "OSINT articles, threat actors, aviation/security context and source log."},
+            {"key": "launch-readiness", "title": "Launch Readiness", "url": "/reporting/launch-readiness?v=0122", "description": "Fast RF posture, GNSS burden, UAS link risk, data quality and launch-support recommendation."},
+            {"key": "jamming-report", "title": "Jamming / Interference Report", "url": "/reporting/jamming?v=0122", "description": "Suspected GNSS/C2 interference report with affected services, evidence and actions."},
+            {"key": "flight-safety", "title": "Flight Safety Brief", "url": "/reporting/flight-safety?v=0122", "description": "Pilot-facing GNSS/RF burden and clearest observed constellation/band."},
+            {"key": "mission-brief", "title": "Mission Operations Brief", "url": "/reporting/mission-brief?v=0122", "description": "Senior/ops readiness summary, caveats and decision-support brief."},
+            {"key": "j2", "title": "J2 Live Report", "url": "/reporting/j2?v=0122", "description": "OSINT articles, threat actors, aviation/security context and source log."},
             {"key": "gnss-serviceability", "title": "GNSS Serviceability", "url": "/reporting/gnss-serviceability?v=0122", "description": "GPS/GNSS serviceability decision support and required receiver checks."},
             {"key": "candidate-report", "title": "Candidate Site Report", "url": "/reporting/candidate?v=0122", "description": "End-state antenna/candidate report and PDF entry point."},
             {"key": "source-location-report", "title": "Likely Source Report", "url": "/reporting/source-location?v=0122", "description": "Report-first output for RSSI likely-source analysis from concurrent suspicious pings."},
@@ -6803,22 +8034,34 @@ def _v012_nav_registry() -> dict[str, _V012Any]:
             {"key": "export-pack", "title": "Export Pack", "url": "/reporting/export?v=0122", "description": "Mission report, J2 source log, candidate assessment and archive links."},
         ],
         "engineering": [
-            {"key": "data-quality", "title": "Data Quality Detail", "url": "/engineering/data-quality?v=0122", "legacy_url": "/static/data_quality.html?v=080", "description": "Import quality, scan coverage, reject/flag detail and confidence."},
-            {"key": "rf", "title": "RF Analyst", "url": "/engineering/rf?v=0122", "legacy_url": "/static/launch_analysis.html?v=075", "description": "Launch windows, L1/L2/L5 timelines, spectrum/spikes and pattern-of-life."},
-            {"key": "spectrum", "title": "Spectrum / Spikes", "url": "/engineering/spectrum?v=0122", "legacy_url": "/static/launch_analysis.html?v=075#spectrum", "description": "Technical spectrum bins, dBm values, busy frequencies and abnormal spikes."},
-            {"key": "map", "title": "Map / H3 Layers", "url": "/engineering/map?v=0122", "legacy_url": "/?v=0122", "description": "Raw map, H3 layers, RF burden, suitability and confidence overlays."},
-            {"key": "candidates", "title": "Candidate Engineering", "url": "/engineering/candidates?v=0122", "legacy_url": "/?v=0122#candidates", "description": "Candidate scoring, comparison, evidence drill-down and engineering view."},
+            {"key": "data-quality", "title": "Data Quality Detail", "url": "/engineering/data-quality?v=0122", "description": "Input confidence, scan coverage, reject/flag detail and analysis caveats."},
+            {"key": "rf", "title": "RF Analyst", "url": "/engineering/rf?v=0122", "description": "Launch windows, L1/L2/L5 timelines, spectrum/spikes and pattern-of-life."},
+            {"key": "spectrum", "title": "Spectrum / Spikes", "url": "/engineering/spectrum?v=0122", "description": "Technical spectrum bins, dBm values, busy frequencies and abnormal spikes."},
+            {"key": "map", "title": "Survey Map", "url": "/engineering/map?v=0122", "description": "AOI, H3 layers, RF burden, suitability and confidence overlays."},
+            {"key": "candidates", "title": "Candidate Engineering", "url": "/engineering/candidates?v=0122", "description": "Candidate scoring, comparison, evidence drill-down and engineering view."},
             {"key": "source-location", "title": "Likely Source Heat Map", "url": "/engineering/source-location?v=0122", "description": "RSSI confidence heat map when overlapping suspicious RF pings exist."},
             {"key": "pattern-of-life", "title": "Pattern of Life", "url": "/engineering/pattern-of-life?v=0122", "description": "Recurring quiet/noisy periods by hour, day, week or month."},
-            {"key": "imports", "title": "Import Diagnostics", "url": "/engineering/import-diagnostics?v=0122", "description": "CSV import, parser status, quality mode and source file notes."},
-            {"key": "api-viewer", "title": "API Payload Viewer", "url": "/engineering/api-viewer?v=0122", "description": "Developer-facing endpoint/payload inspection without leaving the app."},
         ],
         "system": [
             {"key": "status", "title": "System Status", "url": "/system/status?v=0122", "description": "Runtime, database, static page and API status."},
-            {"key": "deploy-check", "title": "Deploy Check", "url": "/system/deploy-check?v=0122", "legacy_url": "/api/platform/deploy-check", "description": "Runtime dependencies, static files and deployment readiness."},
+            {"key": "deploy-check", "title": "Deploy Check", "url": "/system/deploy-check?v=0122", "description": "Runtime dependencies, static files and deployment readiness."},
             {"key": "logs", "title": "Logs", "url": "/system/logs?v=0122", "description": "Local stdout/stderr log file pointers and support checks."},
             {"key": "app-map", "title": "App Map", "url": "/system/app-map?v=0122", "description": "Current route map, overlap notes and canonical ownership."},
-            {"key": "health-json", "title": "Health JSON", "url": "/api/platform/health", "description": "Raw platform health payload."},
+            {"key": "back-office", "title": "Back Office / Legacy", "url": "/system/back-office?v=0122", "description": "Compatibility aliases, raw payloads and developer support pages."},
+        ],
+        "legacy": [
+            {"key": "legacy-live-sensors", "title": "Legacy Live Sensors Alias", "url": "/engineering/live-sensors?v=0122", "canonical_url": "/ingest/live-sensors?v=0122", "description": "Compatibility route for the former Engineering live-sensors page."},
+            {"key": "legacy-import-diagnostics", "title": "Legacy Import Diagnostics Alias", "url": "/engineering/import-diagnostics?v=0122", "canonical_url": "/ingest/import-diagnostics?v=0122", "description": "Compatibility route for the former Engineering import diagnostics page."},
+            {"key": "legacy-flight-safety", "title": "Legacy Flight Safety Alias", "url": "/lantern?v=0122", "canonical_url": "/reporting/flight-safety?v=0122", "description": "Compatibility entry point for the reporting flight-safety brief."},
+            {"key": "legacy-mission-brief", "title": "Legacy Mission Brief Static Page", "url": "/static/mission_brief.html?v=092", "canonical_url": "/reporting/mission-brief?v=0122", "description": "Original static mission brief retained for comparison and recovery."},
+            {"key": "legacy-j2", "title": "Legacy J2 Static Page", "url": "/static/j2_report.html?v=118", "canonical_url": "/reporting/j2?v=0122", "description": "Original static J2 report retained for comparison and recovery."},
+            {"key": "legacy-data-quality", "title": "Legacy Data Quality Static Page", "url": "/static/data_quality.html?v=080", "canonical_url": "/engineering/data-quality?v=0122", "description": "Original data quality detail retained behind the canonical wrapper."},
+            {"key": "legacy-rf", "title": "Legacy RF Analysis Static Page", "url": "/static/launch_analysis.html?v=075", "canonical_url": "/engineering/rf?v=0122", "description": "Original RF analysis page retained behind the canonical wrapper."},
+            {"key": "legacy-map-root", "title": "Legacy Survey Map", "url": "/static/index.html?v=0133&map_mode=h3", "canonical_url": "/engineering/map?v=0122", "description": "Original static map retained behind the Engineering map wrapper."},
+            {"key": "api-viewer", "title": "API Payload Viewer", "url": "/engineering/api-viewer?v=0122", "canonical_url": "/system/back-office?v=0122", "description": "Developer-facing endpoint and payload inspection."},
+            {"key": "deploy-check-json", "title": "Deploy Check JSON", "url": "/api/platform/deploy-check", "canonical_url": "/system/deploy-check?v=0122", "description": "Raw deploy readiness payload."},
+            {"key": "health-json", "title": "Health JSON", "url": "/api/platform/health", "canonical_url": "/system/status?v=0122", "description": "Raw platform health payload."},
+            {"key": "routes-json", "title": "Routes JSON", "url": "/api/platform/routes", "canonical_url": "/system/app-map?v=0122", "description": "Raw registered-route payload."},
         ],
     }
     for item in primary:
@@ -6829,12 +8072,12 @@ def _v012_nav_registry() -> dict[str, _V012Any]:
     groups = [
         {"group": "Home", "key": "home", "items": [primary[0]]},
         {"group": "Mission Context", "key": "context", "items": [primary[1]]},
+        {"group": "Ingest", "key": "ingest", "items": sections["ingest"]},
         {"group": "Reporting", "key": "reporting", "items": sections["reporting"]},
         {"group": "Engineering", "key": "engineering", "items": sections["engineering"]},
         {"group": "System", "key": "system", "items": sections["system"]},
     ]
     return {"primary": primary, "sections": sections, "groups": groups}
-
 
 def _v012_db_summary() -> dict[str, _V012Any]:
     db_path = None
@@ -6905,9 +8148,9 @@ def _v012_module_ok(name: str) -> bool:
 def _v012_static_file_checks() -> dict[str, bool]:
     static = _v012_static_dir()
     names = [
-        "platform_home.html", "mission_context.html", "reporting_home.html", "engineering_home.html", "system_home.html", "app_map.html",
+        "platform_home.html", "mission_context.html", "ingest_home.html", "ingest_upload.html", "reporting_home.html", "engineering_home.html", "system_home.html", "back_office.html", "app_map.html",
         "api_viewer.html", "platform_shell.css", "platform_shell.js", "platform_navigation.json", "eei_tactical_eagle.svg", "lantern_flight_safety.html",
-        "mission_brief.html", "j2_report.html", "launch_analysis.html", "source_location.html", "data_quality.html", "index.html",
+        "mission_brief.html", "j2_report.html", "launch_readiness.html", "jamming_report.html", "launch_analysis.html", "source_location.html", "data_quality.html", "live_sensors.html", "index.html",
     ]
     return {name: (static / name).exists() for name in names}
 
@@ -6936,6 +8179,17 @@ def lantern_v012_context_page() -> str:
     return _v012_static_page("mission_context.html", "LANTERN Mission Context")
 
 
+@app.get("/ingest", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_ingest_home() -> str:
+    return _v012_static_page("ingest_home.html", "LANTERN Ingest")
+
+
+
+
+@app.get("/ingest/upload", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_ingest_upload() -> str:
+    return _v012_static_page("ingest_upload.html", "LANTERN Data Ingest")
+
 @app.get("/reporting", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_reporting_home() -> str:
     return _v012_static_page("reporting_home.html", "LANTERN Reporting")
@@ -6951,6 +8205,19 @@ def lantern_v012_system_home() -> str:
     return _v012_static_page("system_home.html", "LANTERN System")
 
 
+@app.get("/system/back-office", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_system_back_office() -> str:
+    return _v012_static_page("back_office.html", "LANTERN Back Office / Legacy")
+
+@app.get("/reporting/launch-readiness", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_reporting_launch_readiness_page() -> str:
+    return _v012_static_page("launch_readiness.html", "LANTERN Launch Readiness")
+
+
+@app.get("/reporting/jamming", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_reporting_jamming_page() -> str:
+    return _v012_static_page("jamming_report.html", "LANTERN Jamming / Interference Report")
+
 @app.get("/reporting/flight-safety", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_reporting_flight_safety() -> str:
     return _v012_frame_page("LANTERN Flight Safety Brief", "/static/lantern_flight_safety.html?v=0122", "reporting")
@@ -6963,7 +8230,7 @@ def lantern_v012_reporting_mission_brief() -> str:
 
 @app.get("/reporting/j2", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_reporting_j2() -> str:
-    return _v012_frame_page("LANTERN J2 Live Report", "/static/j2_report.html?v=115", "reporting")
+    return _v012_frame_page("LANTERN J2 Live Report", "/static/j2_report.html?v=118", "reporting")
 
 
 @app.get("/j2", include_in_schema=False)  # type: ignore[name-defined]
@@ -7001,24 +8268,33 @@ def lantern_v012_engineering_data_quality() -> str:
     return _v012_frame_page("LANTERN Data Quality Detail", "/static/data_quality.html?v=080", "engineering")
 
 
+@app.get("/ingest/live-sensors", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_ingest_live_sensors() -> str:
+    return _v012_static_page("live_sensors.html", "LANTERN Live Sensors")
+
+
+@app.get("/engineering/live-sensors", include_in_schema=False)  # type: ignore[name-defined]
+def lantern_v012_engineering_live_sensors_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/ingest/live-sensors?v=0122", status_code=307)
+
 @app.get("/engineering/rf", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_engineering_rf() -> str:
-    return _v012_frame_page("LANTERN RF Analyst", "/static/launch_analysis.html?v=075", "engineering")
+    return _v012_frame_page("LANTERN RF Analyst", "/static/launch_analysis.html?v=0144", "engineering")
 
 
 @app.get("/engineering/spectrum", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_engineering_spectrum() -> str:
-    return _v012_frame_page("LANTERN Spectrum / Spikes", "/static/launch_analysis.html?v=075#spectrum", "engineering")
+    return _v012_frame_page("LANTERN Spectrum / Spikes", "/static/launch_analysis.html?v=0144#spectrum", "engineering")
 
 
 @app.get("/engineering/map", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_engineering_map() -> str:
-    return _v012_frame_page("LANTERN Map / H3 Layers", "/static/index.html?v=0122&map_mode=h3", "engineering")
+    return _v012_frame_page("LANTERN Survey Map", "/static/index.html?v=0133&map_mode=h3", "engineering")
 
 
 @app.get("/engineering/candidates", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_engineering_candidates() -> str:
-    return _v012_frame_page("LANTERN Candidate Engineering", "/static/index.html?v=0122&map_mode=candidates#candidates", "engineering")
+    return _v012_frame_page("LANTERN Candidate Engineering", "/static/index.html?v=0133&map_mode=candidates#candidates", "engineering")
 
 
 @app.get("/engineering/source-location", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
@@ -7031,10 +8307,14 @@ def lantern_v012_engineering_pattern_of_life() -> str:
     return _v012_static_page("pattern_of_life.html", "LANTERN Pattern of Life")
 
 
-@app.get("/engineering/import-diagnostics", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
-def lantern_v012_engineering_import_diagnostics() -> str:
+@app.get("/ingest/import-diagnostics", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
+def lantern_v012_ingest_import_diagnostics() -> str:
     return _v012_static_page("import_diagnostics.html", "LANTERN Import Diagnostics")
 
+
+@app.get("/engineering/import-diagnostics", include_in_schema=False)  # type: ignore[name-defined]
+def lantern_v012_engineering_import_diagnostics_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/ingest/import-diagnostics?v=0122", status_code=307)
 
 @app.get("/engineering/api-viewer", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_engineering_api_viewer() -> str:
@@ -7070,10 +8350,10 @@ def lantern_v012_platform_navigation() -> dict[str, _V012Any]:
         "generated_utc": _v012_now(),
         **registry,
         "notes": [
-            "Primary navigation is Home, Mission Context, Reporting, Engineering, System, with v0.12.2 tactical cobalt/carbon shell styling.",
+            "Primary navigation is Home, Mission Context, Ingest, Reporting, Engineering and System, with v0.12.2 tactical cobalt/carbon shell styling.",
             "Reporting owns end-state decision/reporting outputs.",
-            "Engineering owns technical evidence generation, diagnostics and analyst tooling.",
-            "Legacy URLs remain available as compatibility entry points.",
+            "Engineering owns technical evidence generation and analyst evidence pages.",
+            "Legacy URLs, raw JSON and developer support tools remain available under System > Back Office / Legacy.",
         ],
     }
 
@@ -7172,7 +8452,7 @@ def lantern_v012_platform_app_map() -> dict[str, _V012Any]:
         {"area": "GNSS/RF", "pages": ["Flight Safety Brief", "RF Analyst"], "decision": "Keep. Reporting summarizes; Engineering explains."},
         {"area": "Mission readiness", "pages": ["Mission Operations Brief", "Flight Safety Brief"], "decision": "Keep as shared evidence. Mission Brief should consume the Flight Safety summary."},
         {"area": "J2/security", "pages": ["Mission Operations Brief", "J2 Live Report"], "decision": "Keep. J2 owns source detail; Mission Brief only shows summary."},
-        {"area": "Candidate scoring", "pages": ["Candidate Site Report", "Map / Candidate Engineering"], "decision": "Keep. Engineering creates evidence; Reporting packages the end-state recommendation."},
+        {"area": "Candidate scoring", "pages": ["Candidate Site Report", "Survey Map / Candidate Engineering"], "decision": "Keep. Engineering creates evidence; Reporting packages the end-state recommendation."},
         {"area": "Map colours", "pages": ["Antenna suitability", "RF burden/quietness"], "decision": "Keep separate legends. Green means different things depending on layer type."},
         {"area": "Old /rotator", "pages": ["J2 Live Report"], "decision": "Do not restore /rotator. Article rotation belongs inside J2 Live Report."},
     ]
@@ -7187,7 +8467,7 @@ def lantern_v012_platform_deploy_check() -> dict[str, _V012Any]:
     checks.append({"name": "Python", "status": "pass", "detail": _v012_sys.version.split()[0]})
     checks.append({"name": "Database path", "status": "pass" if db.get("exists") else "warn", "detail": db.get("path") or "DB_PATH unavailable"})
     for name, exists in _v012_static_file_checks().items():
-        required = name in {"platform_home.html", "mission_context.html", "reporting_home.html", "engineering_home.html", "system_home.html", "platform_shell.css", "platform_shell.js"}
+        required = name in {"platform_home.html", "mission_context.html", "ingest_home.html", "ingest_upload.html", "reporting_home.html", "engineering_home.html", "system_home.html", "back_office.html", "platform_shell.css", "platform_shell.js"}
         status = "pass" if exists else "fail" if required else "warn"
         checks.append({"name": f"Static file: {name}", "status": status, "detail": str(static / name)})
     for mod in ["fastapi", "uvicorn", "pandas", "h3", "orjson", "pydantic"]:
@@ -7200,6 +8480,7 @@ def lantern_v012_platform_deploy_check() -> dict[str, _V012Any]:
         ("/reporting", _v012_route_exists("/reporting")),
         ("/engineering", _v012_route_exists("/engineering")),
         ("/system", _v012_route_exists("/system")),
+        ("/system/back-office", _v012_route_exists("/system/back-office")),
         ("/api/platform/navigation", _v012_route_exists("/api/platform/navigation")),
         ("/api/platform/mission-context", _v012_route_exists("/api/platform/mission-context")),
     ]
@@ -7217,7 +8498,8 @@ def lantern_v012_platform_deploy_check() -> dict[str, _V012Any]:
         "deployment_guidance": [
             "Use /app?v=0122 as the only platform home.",
             "Use Reporting for end-state outputs.",
-            "Use Engineering for technical evidence and diagnostics.",
+            "Use Engineering for technical evidence and analyst pages.",
+            "Use System > Back Office / Legacy for raw payloads, compatibility aliases and developer support tools.",
             "Use Start_LANTERN_Local.ps1 or LANTERN_App.ps1 after deploy-check has no failures.",
         ],
     }
@@ -7262,4 +8544,3 @@ def lantern_v012_j2_rotator_check_compat() -> dict[str, _V012Any]:
     return _v012_j2_live_payload()
 
 # ---- end LANTERN v0.12.2 Tactical UI / Mapping Header Hotfix layer ----
-
