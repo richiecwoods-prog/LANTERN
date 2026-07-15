@@ -35,6 +35,7 @@
     @media(max-width:1100px){.span-8,.span-7,.span-6,.span-5,.span-4,.span-3{grid-column:span 12}}
     label{display:block;font-size:12px;color:var(--muted);margin:0 0 4px 0}
     input,select,button{border-radius:8px;border:1px solid var(--line);background:#0c1626;color:var(--text);padding:9px 10px;font-size:13px;width:100%}
+    input[type="datetime-local"]{color-scheme:dark}
     button{cursor:pointer;background:#1d4f7a;border-color:#316990;font-weight:700;letter-spacing:.02em}
     button:hover{background:#24669b}.controls{display:grid;grid-template-columns:repeat(8,1fr);gap:10px;align-items:end}.controls>div{grid-column:span 1}.controls>.wide{grid-column:span 2}
     @media(max-width:900px){.controls{grid-template-columns:repeat(2,1fr)}.controls>div,.controls>.wide{grid-column:span 1}}
@@ -53,9 +54,9 @@
     .error{color:#ffb4a6;background:#381a18;border:1px solid #7f2a20;padding:10px;border-radius:8px;white-space:pre-wrap}.okline{color:#b9f6ca}.print-only{display:none}
     @media print{body{background:#fff;color:#111}.wrap,header{padding:8px;max-width:none}.card{box-shadow:none;background:#fff;color:#111;border-color:#aaa}.subtitle,.small,.muted,label{color:#333}button,.top-links,.controls,.no-print{display:none!important}.print-only{display:block}canvas{border-color:#888}th{background:#eee;color:#111}.metric{border-color:#ccc}}
   </style>
-  <link rel="stylesheet" href="/static/platform_shell.css?v=0127" />
+  <link rel="stylesheet" href="/static/platform_shell.css?v=0134" />
 </head>
-<body>
+<body><script data-eei-shell-early src="/static/platform_shell.js?v=0134"></script>
   <header>
     <div>
       <h1>LANTERN</h1>
@@ -74,8 +75,8 @@
       <h2>Filters</h2>
       <div class="controls">
         <div class="wide"><label>Collection IDs, comma-separated</label><input id="collectionIds" placeholder="blank = all loaded scans" /></div>
-        <div class="wide"><label>Start UTC</label><input id="startUtc" placeholder="2026-05-24T08:00:00Z" /></div>
-        <div class="wide"><label>End UTC</label><input id="endUtc" placeholder="2026-05-24T12:00:00Z" /></div>
+        <div class="wide"><label>Start UTC</label><input id="startUtc" type="datetime-local" step="60" min="2020-01-01T00:00" max="2035-12-31T23:59" title="UTC date/time" /></div>
+        <div class="wide"><label>End UTC</label><input id="endUtc" type="datetime-local" step="60" min="2020-01-01T00:00" max="2035-12-31T23:59" title="UTC date/time; leave blank for latest" /></div>
         <div><label>Bin MHz</label><input id="binMhz" type="number" min="0.5" max="25" step="0.5" value="2" /></div>
         <div><label>Spike dBm</label><input id="spikeDbm" type="number" step="1" value="-60" /></div>
         <div><label>&nbsp;</label><button id="refreshBtn">Refresh brief</button></div>
@@ -194,15 +195,18 @@ let latestReporting = null;
 function qs(){
   const params = new URLSearchParams(location.search);
   for(const [key,id] of [["collection_ids","collectionIds"],["start_utc","startUtc"],["end_utc","endUtc"],["freq_bin_mhz","binMhz"],["spike_dbm","spikeDbm"]]){
-    if(params.has(key)) $(id).value = params.get(key);
+    if(params.has(key)) $(id).value = id === "startUtc" || id === "endUtc" ? controlUtcValue(params.get(key)) : params.get(key);
   }
 }
+function fieldValue(id){return String($(id).value||"").trim();}
+function controlUtcValue(value){const v=String(value||"").trim();return v?v.replace(/Z$/,"").slice(0,16):"";}
+function utcVal(id,end=false){const v=fieldValue(id);if(!v)return"";if(v.endsWith("Z"))return v;return v.length===16?`${v}:${end?"59":"00"}Z`:`${v}Z`;}
 
 function buildParams(extra={}){
   const p = new URLSearchParams();
-  const ids = $("collectionIds").value.trim();
-  const st = $("startUtc").value.trim();
-  const en = $("endUtc").value.trim();
+  const ids = fieldValue("collectionIds");
+  const st = utcVal("startUtc");
+  const en = utcVal("endUtc", true);
   if(ids) p.set("collection_ids", ids);
   if(st) p.set("start_utc", st);
   if(en) p.set("end_utc", en);
@@ -874,6 +878,6 @@ $("refreshBtn").addEventListener("click", refresh);
 qs();
 refresh();
 </script>
-  <script src="/static/platform_shell.js?v=0127" defer></script>
+  <script src="/static/platform_shell.js?v=0134" defer></script>
 </body>
 </html>

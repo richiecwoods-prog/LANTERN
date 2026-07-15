@@ -15,9 +15,9 @@
     .aoiResult{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;border:1px solid var(--line);border-radius:9px;padding:10px;margin-top:8px;background:#0d1727}.tag{display:inline-flex;border:1px solid #2f4565;border-radius:999px;padding:3px 7px;font-size:11px;color:#dcecff;margin:2px;background:#0d1727}.status{white-space:pre-wrap;background:#0d1727;border:1px solid var(--line);border-radius:10px;padding:10px}
     pre{white-space:pre-wrap;overflow:auto;max-height:360px}
   </style>
-  <link rel="stylesheet" href="/static/platform_shell.css?v=0127" />
+  <link rel="stylesheet" href="/static/platform_shell.css?v=0134" />
 </head>
-<body>
+<body><script data-eei-shell-early src="/static/platform_shell.js?v=0134"></script>
   <section class="hero"><div class="wrap"><h1>Mission Context</h1><div class="sub">Shared AOI, collections, time window, quality status and assumptions.</div></div></section>
   <main class="wrap">
     <section class="grid">
@@ -90,6 +90,6 @@
     }
     loadContext().then(()=>Promise.allSettled([loadAoiOptions(), searchAoi()]));
   </script>
-  <script src="/static/platform_shell.js?v=0127" defer></script>
+  <script src="/static/platform_shell.js?v=0134" defer></script>
 </body>
 </html>

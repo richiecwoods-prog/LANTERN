@@ -4,8 +4,10 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Likely Source Heat Map</title>
+<link href="https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.css" rel="stylesheet" />
+<script src="https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.js"></script>
 <style>
-:root{--bg:#0b1220;--panel:#101a2b;--panel2:#16243a;--line:#2b3a52;--text:#e8eef7;--muted:#9fb0c5;--blue:#24669b;--good:#23a455;--amber:#d4a017;--bad:#d45050;--grey:#7a7f88}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif;line-height:1.42}.hero{padding:28px 24px 18px;background:radial-gradient(circle at top left,rgba(36,102,155,.35),transparent 42%),#07101e;border-bottom:1px solid var(--line)}body.source-location{background:linear-gradient(135deg,rgba(212,80,80,.10),transparent 28%),linear-gradient(180deg,#12141b,#080d14)}body.source-location .hero{background:linear-gradient(90deg,rgba(212,80,80,.28),rgba(36,102,155,.20) 48%,rgba(35,164,85,.12)),linear-gradient(180deg,#1a1218,#07101e);border-bottom-color:#81464c}body.source-location .card{border-color:#57495b;background:linear-gradient(135deg,rgba(212,80,80,.055),transparent 38%),linear-gradient(180deg,#121a28,#0b111c)}body.source-location .mapbox{border-color:#8c4a54;box-shadow:inset 0 0 0 1px rgba(255,255,255,.04),0 0 26px rgba(212,80,80,.12)}body.source-location .status{border-color:#51445a;background:#0b111c}.wrap{max-width:1480px;margin:0 auto;padding:18px 24px}.hero .wrap{padding:0 24px}h1{margin:0;font-size:30px;letter-spacing:0}h2{font-size:18px;margin:0 0 10px}h3{font-size:14px;margin:0 0 7px;color:#eaf3ff}.sub,.small,.muted{color:var(--muted)}.sub{font-size:14px;margin-top:8px;max-width:980px}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}.card{grid-column:span 4;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:15px;box-shadow:0 8px 20px rgba(0,0,0,.16)}.span-12{grid-column:span 12}.span-8{grid-column:span 8}.span-6{grid-column:span 6}.span-4{grid-column:span 4}.span-3{grid-column:span 3}@media(max-width:1050px){.card,.span-8,.span-6,.span-4,.span-3{grid-column:span 12}}.btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.btn,button{display:inline-flex;align-items:center;justify-content:center;border:1px solid #316990;background:#1d4f7a;color:#fff;text-decoration:none;border-radius:7px;padding:9px 11px;font-size:13px;font-weight:800;cursor:pointer}.btn.secondary,button.secondary{background:#13233a;border-color:var(--line)}.btn.good{background:#1f6f3c;border-color:#2a8b50}.btn.disabled,button:disabled{background:#26303d;border-color:#4d5663;color:#aeb8c4;cursor:not-allowed}.btn:hover,button:hover{filter:brightness(1.12)}label{display:block;font-size:12px;color:var(--muted);margin-top:8px}input,select{width:100%;box-sizing:border-box;padding:8px;border-radius:7px;border:1px solid var(--line);background:#0d1727;color:#e8eef7}.controls{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}@media(max-width:900px){.controls{grid-template-columns:1fr 1fr}}@media(max-width:560px){.controls{grid-template-columns:1fr}}table{width:100%;border-collapse:collapse;font-size:12px}td,th{border-bottom:1px solid var(--line);padding:8px;text-align:left;vertical-align:top}th{background:#132035;color:#cfe1f6}.kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.kpi .box{background:#0d1727;border:1px solid var(--line);border-radius:8px;padding:10px}.kpi b{display:block;font-size:20px}.kpi span{font-size:11px;color:var(--muted)}@media(max-width:900px){.kpi{grid-template-columns:repeat(2,1fr)}}.status{white-space:pre-wrap;background:#0d1727;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:12px}.badge{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:5px 9px;font-size:11px;font-weight:900}.badge:before{content:"";width:9px;height:9px;border-radius:50%;background:var(--grey)}.badge.good{border-color:#246a49}.badge.good:before{background:var(--good)}.badge.check{border-color:#806b2a}.badge.check:before{background:var(--amber)}.badge.bad{border-color:#853a3f}.badge.bad:before{background:var(--bad)}.mapbox{position:relative;background:#08101b;border:1px solid var(--line);border-radius:8px;overflow:hidden;min-height:520px}.mapbox canvas{display:block;width:100%;height:520px}.legend{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--muted)}.bar{width:220px;max-width:100%;height:12px;border:1px solid #485a70;border-radius:999px;background:linear-gradient(90deg,#111827,#244766,#23a455,#d4a017,#d45050,#f4f7fb)}.empty{display:flex;align-items:center;justify-content:center;min-height:260px;text-align:center;color:#d8e2ee}.mono{font-family:Consolas,Menlo,monospace}.error{white-space:pre-wrap;background:#351b18;border:1px solid #803126;color:#ffd3ca;border-radius:8px;padding:10px}.tag{display:inline-flex;border:1px solid #2f4565;border-radius:999px;padding:3px 7px;font-size:11px;color:#dcecff;margin:2px;background:#0d1727}.report-card{border-color:#84644a!important;background:linear-gradient(135deg,rgba(212,169,23,.08),transparent 44%),linear-gradient(180deg,#141923,#0a111c)!important}.report-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.report-head h2{margin-bottom:4px}.report-box{background:#0d1727;border:1px solid #3e4c62;border-radius:8px;padding:10px}.report-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:10px}.report-grid b{display:block;font-size:16px}.report-list{margin:8px 0 0;padding-left:18px}.report-list li{margin:4px 0}.report-action{font-weight:800;color:#f5d184}.report-copy-state{align-self:center;color:var(--muted);font-size:12px}body.report-mode .report-card{order:10;grid-column:span 8}body.report-mode .map-card{order:20;grid-column:span 4}body.report-mode .status-card{order:25;grid-column:span 4}body.report-mode .source-filter-card{order:30}body.report-mode .evidence-card{order:35}@media(max-width:1050px){body.report-mode .report-card,body.report-mode .map-card,body.report-mode .status-card{grid-column:span 12}.report-grid{grid-template-columns:1fr}}@media print{#eei-app-shell,.btnrow,.controls{display:none!important}body{background:#fff;color:#111}.hero,.card{box-shadow:none;background:#fff;color:#111}.sub,.small,.muted{color:#333}}
+:root{--bg:#0b1220;--panel:#101a2b;--panel2:#16243a;--line:#2b3a52;--text:#e8eef7;--muted:#9fb0c5;--blue:#24669b;--good:#23a455;--amber:#d4a017;--bad:#d45050;--grey:#7a7f88}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif;line-height:1.42}.hero{padding:28px 24px 18px;background:radial-gradient(circle at top left,rgba(36,102,155,.35),transparent 42%),#07101e;border-bottom:1px solid var(--line)}body.source-location{background:linear-gradient(135deg,rgba(212,80,80,.10),transparent 28%),linear-gradient(180deg,#12141b,#080d14)}body.source-location .hero{background:linear-gradient(90deg,rgba(212,80,80,.28),rgba(36,102,155,.20) 48%,rgba(35,164,85,.12)),linear-gradient(180deg,#1a1218,#07101e);border-bottom-color:#81464c}body.source-location .card{border-color:#57495b;background:linear-gradient(135deg,rgba(212,80,80,.055),transparent 38%),linear-gradient(180deg,#121a28,#0b111c)}body.source-location .mapbox{border-color:#8c4a54;box-shadow:inset 0 0 0 1px rgba(255,255,255,.04),0 0 26px rgba(212,80,80,.12)}body.source-location .status{border-color:#51445a;background:#0b111c}.wrap{max-width:1480px;margin:0 auto;padding:18px 24px}.hero .wrap{padding:0 24px}h1{margin:0;font-size:30px;letter-spacing:0}h2{font-size:18px;margin:0 0 10px}h3{font-size:14px;margin:0 0 7px;color:#eaf3ff}.sub,.small,.muted{color:var(--muted)}.sub{font-size:14px;margin-top:8px;max-width:980px}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}.card{grid-column:span 4;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:15px;box-shadow:0 8px 20px rgba(0,0,0,.16)}.span-12{grid-column:span 12}.span-8{grid-column:span 8}.span-6{grid-column:span 6}.span-4{grid-column:span 4}.span-3{grid-column:span 3}@media(max-width:1050px){.card,.span-8,.span-6,.span-4,.span-3{grid-column:span 12}}.btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.btn,button{display:inline-flex;align-items:center;justify-content:center;border:1px solid #316990;background:#1d4f7a;color:#fff;text-decoration:none;border-radius:7px;padding:9px 11px;font-size:13px;font-weight:800;cursor:pointer}.btn.secondary,button.secondary{background:#13233a;border-color:var(--line)}.btn.good{background:#1f6f3c;border-color:#2a8b50}.btn.disabled,button:disabled{background:#26303d;border-color:#4d5663;color:#aeb8c4;cursor:not-allowed}.btn:hover,button:hover{filter:brightness(1.12)}label{display:block;font-size:12px;color:var(--muted);margin-top:8px}input,select{width:100%;box-sizing:border-box;padding:8px;border-radius:7px;border:1px solid var(--line);background:#0d1727;color:#e8eef7}.controls{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}@media(max-width:900px){.controls{grid-template-columns:1fr 1fr}}@media(max-width:560px){.controls{grid-template-columns:1fr}}table{width:100%;border-collapse:collapse;font-size:12px}td,th{border-bottom:1px solid var(--line);padding:8px;text-align:left;vertical-align:top}th{background:#132035;color:#cfe1f6}.kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.kpi .box{background:#0d1727;border:1px solid var(--line);border-radius:8px;padding:10px}.kpi b{display:block;font-size:20px}.kpi span{font-size:11px;color:var(--muted)}@media(max-width:900px){.kpi{grid-template-columns:repeat(2,1fr)}}.status{white-space:pre-wrap;background:#0d1727;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:12px}.badge{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:5px 9px;font-size:11px;font-weight:900}.badge:before{content:"";width:9px;height:9px;border-radius:50%;background:var(--grey)}.badge.good{border-color:#246a49}.badge.good:before{background:var(--good)}.badge.check{border-color:#806b2a}.badge.check:before{background:var(--amber)}.badge.bad{border-color:#853a3f}.badge.bad:before{background:var(--bad)}.mapbox{position:relative;background:#08101b;border:1px solid var(--line);border-radius:8px;overflow:hidden;min-height:520px}.mapbox #sourceMap{position:absolute;inset:0;z-index:1;background:#08101b}.mapbox canvas{position:absolute;inset:0;z-index:2;display:block;width:100%;height:520px;pointer-events:none}.mapbox.no-map canvas{position:relative;background:#08101b}.mapbox .maplibregl-ctrl{font:12px Arial,Helvetica,sans-serif}.legend{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--muted)}.bar{width:220px;max-width:100%;height:12px;border:1px solid #485a70;border-radius:999px;background:linear-gradient(90deg,#111827,#244766,#23a455,#d4a017,#d45050,#f4f7fb)}.empty{display:flex;align-items:center;justify-content:center;min-height:260px;text-align:center;color:#d8e2ee}.mono{font-family:Consolas,Menlo,monospace}.error{white-space:pre-wrap;background:#351b18;border:1px solid #803126;color:#ffd3ca;border-radius:8px;padding:10px}.tag{display:inline-flex;border:1px solid #2f4565;border-radius:999px;padding:3px 7px;font-size:11px;color:#dcecff;margin:2px;background:#0d1727}.report-card{border-color:#84644a!important;background:linear-gradient(135deg,rgba(212,169,23,.08),transparent 44%),linear-gradient(180deg,#141923,#0a111c)!important}.report-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.report-head h2{margin-bottom:4px}.report-box{background:#0d1727;border:1px solid #3e4c62;border-radius:8px;padding:10px}.report-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:10px}.report-grid b{display:block;font-size:16px}.report-list{margin:8px 0 0;padding-left:18px}.report-list li{margin:4px 0}.report-action{font-weight:800;color:#f5d184}.report-copy-state{align-self:center;color:var(--muted);font-size:12px}body.report-mode .report-card{order:10;grid-column:span 8}body.report-mode .map-card{order:20;grid-column:span 4}body.report-mode .status-card{order:25;grid-column:span 4}body.report-mode .source-filter-card{order:30}body.report-mode .evidence-card{order:35}@media(max-width:1050px){body.report-mode .report-card,body.report-mode .map-card,body.report-mode .status-card{grid-column:span 12}.report-grid{grid-template-columns:1fr}}@media print{#eei-app-shell,.btnrow,.controls{display:none!important}body{background:#fff;color:#111}.hero,.card{box-shadow:none;background:#fff;color:#111}.sub,.small,.muted{color:#333}}
 </style>
 <style>
 body.report-mode .status-card,
@@ -16,10 +18,11 @@ body.report-mode .map-card{grid-column:span 4}
   body.report-mode .report-card,
   body.report-mode .map-card{grid-column:span 12}
 }
+input[type="datetime-local"]{color-scheme:dark}
 </style>
-<link rel="stylesheet" href="/static/platform_shell.css?v=0127" />
+<link rel="stylesheet" href="/static/platform_shell.css?v=0134" />
 </head>
-<body class="source-location">
+<body class="source-location"><script data-eei-shell-early src="/static/platform_shell.js?v=0134"></script>
 <section class="hero"><div class="wrap"><h1 id="pageTitle">Likely Source Heat Map</h1><div id="pageSubtitle" class="sub">RSSI confidence surface for suspicious RF pings seen across overlapping collections.</div></div></section>
 <main class="wrap">
   <section class="grid">
@@ -40,8 +43,8 @@ body.report-mode .map-card{grid-column:span 4}
       <h2>Filters</h2>
       <div class="controls">
         <div><label>Collection IDs</label><input id="collectionIds" placeholder="blank = all" /></div>
-        <div><label>Start UTC</label><input id="startUtc" placeholder="2026-05-08T06:00:00Z" /></div>
-        <div><label>End UTC</label><input id="endUtc" placeholder="blank = latest" /></div>
+        <div><label>Start UTC</label><input id="startUtc" type="datetime-local" step="60" min="2020-01-01T00:00" max="2035-12-31T23:59" title="UTC date/time" /></div>
+        <div><label>End UTC</label><input id="endUtc" type="datetime-local" step="60" min="2020-01-01T00:00" max="2035-12-31T23:59" title="UTC date/time; leave blank for latest" /></div>
         <div><label>AOI</label><input id="aoi" value="mission" /></div>
         <div><label>Time bucket seconds</label><input id="timeBucket" type="number" min="1" max="3600" value="5" /></div>
         <div><label>Frequency bin MHz</label><input id="freqBinMhz" type="number" min="0.001" step="0.1" value="1" /></div>
@@ -82,12 +85,12 @@ body.report-mode .map-card{grid-column:span 4}
 
     <div class="card span-8 map-card">
       <h2>Heat map</h2>
-      <div class="mapbox"><canvas id="heatCanvas"></canvas></div>
-      <div class="legend"><span>Low</span><span class="bar"></span><span>High</span><span class="tag">circles = receivers</span><span class="tag">rings = ranked likely areas</span></div>
+      <div id="heatMapBox" class="mapbox"><div id="sourceMap"></div><canvas id="heatCanvas"></canvas></div>
+      <div class="legend"><span>Low</span><span class="bar"></span><span>High</span><span class="tag">shading = relative RSSI fit</span><span class="tag">labels = receiver collections</span><span class="tag">ring = top likely area</span></div>
     </div>
     <div class="card span-4 status-card">
       <h2>Status</h2>
-      <div id="statusText" class="status">Loading...</div>
+      <div id="statusText" class="status">Source-location analysis will appear here after the header loader completes.</div>
       <h2 style="margin-top:14px">Top likely areas</h2>
       <div id="candidateRows" class="small">No candidates loaded.</div>
     </div>
@@ -105,8 +108,13 @@ body.report-mode .map-card{grid-column:span 4}
 <script>
 const $ = id => document.getElementById(id);
 let latestData = null;
+let sourceMap = null;
+let sourceMapReady = false;
+let pendingMapData = null;
 const reportMode = location.pathname.startsWith('/reporting/source-location') || new URLSearchParams(location.search).get('mode') === 'report';
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function fieldValue(id){return String($(id).value||'').trim();}
+function utcVal(id,end=false){const v=fieldValue(id);if(!v)return'';if(v.endsWith('Z'))return v;return v.length===16?`${v}:${end?'59':'00'}Z`:`${v}Z`;}
 async function json(url){const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw new Error(await r.text());return r.json();}
 function table(rows, cols){
   if(!rows || !rows.length) return '<div class="muted">None.</div>';
@@ -162,12 +170,125 @@ async function copyReport(){
 }
 function params(){
   const p=new URLSearchParams();
-  const map=[['collectionIds','collection_ids'],['startUtc','start_utc'],['endUtc','end_utc'],['aoi','aoi'],['timeBucket','time_bucket_s'],['minSpread','min_receiver_spread_m'],['suspiciousOnly','suspicious_only'],['suspiciousMinDbm','suspicious_min_dbm'],['maxRows','max_rows'],['gridSize','grid_size']];
-  for(const [id,key] of map){const v=$(id).value.trim(); if(v) p.set(key,v);}
+  const map=[['collectionIds','collection_ids'],['aoi','aoi'],['timeBucket','time_bucket_s'],['minSpread','min_receiver_spread_m'],['suspiciousOnly','suspicious_only'],['suspiciousMinDbm','suspicious_min_dbm'],['maxRows','max_rows'],['gridSize','grid_size']];
+  for(const [id,key] of map){const v=fieldValue(id); if(v) p.set(key,v);}
+  if(utcVal('startUtc')) p.set('start_utc',utcVal('startUtc'));
+  if(utcVal('endUtc',true)) p.set('end_utc',utcVal('endUtc',true));
   const fb=Number($('freqBinMhz').value||1); if(Number.isFinite(fb) && fb>0) p.set('frequency_bin_hz', String(Math.round(fb*1000000)));
   const min=Number($('targetMinMhz').value); if(Number.isFinite(min) && min>0) p.set('target_min_hz', String(Math.round(min*1000000)));
   const max=Number($('targetMaxMhz').value); if(Number.isFinite(max) && max>0) p.set('target_max_hz', String(Math.round(max*1000000)));
   return p.toString();
+}
+function initSourceMap(){
+  const box = $('heatMapBox');
+  if(sourceMap || !box) return;
+  if(!window.maplibregl){box.classList.add('no-map');return;}
+  try{
+    sourceMap = new maplibregl.Map({
+      container:'sourceMap',
+      style:{version:8,sources:{osm:{type:'raster',tiles:['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],tileSize:256,attribution:'(c) OpenStreetMap contributors'}},layers:[{id:'osm',type:'raster',source:'osm'}]},
+      center:[-0.5406,53.2307],
+      zoom:11
+    });
+    sourceMap.addControl(new maplibregl.NavigationControl({showCompass:false}),'top-right');
+    sourceMap.on('load',()=>{sourceMapReady=true;try{sourceMap.resize();}catch(_){}if(pendingMapData&&updateMappedHeatmap(pendingMapData)){const box=heatMapBox;if(box)box.classList.remove('no-map');const c=heatCanvas;const ctx=c&&c.getContext('2d');if(ctx)ctx.clearRect(0,0,c.width,c.height);}});
+    sourceMap.on('error',()=>{box.classList.add('no-map');});
+  }catch(_){box.classList.add('no-map');sourceMap=null;}
+}
+function heatCellPolygon(cell,bounds,cols,rows){
+  const lon0=bounds.min_lon+(cell.col/cols)*(bounds.max_lon-bounds.min_lon);
+  const lon1=bounds.min_lon+((cell.col+1)/cols)*(bounds.max_lon-bounds.min_lon);
+  const lat1=bounds.max_lat-(cell.row/rows)*(bounds.max_lat-bounds.min_lat);
+  const lat0=bounds.max_lat-((cell.row+1)/rows)*(bounds.max_lat-bounds.min_lat);
+  return [[[lon0,lat0],[lon1,lat0],[lon1,lat1],[lon0,lat1],[lon0,lat0]]];
+}
+function geojson(features){return {type:'FeatureCollection',features};}
+function setGeoSource(id,data){
+  if(sourceMap.getSource(id)) sourceMap.getSource(id).setData(data);
+  else sourceMap.addSource(id,{type:'geojson',data});
+}
+function scoreStats(cells){
+  const scores=(cells||[]).map(c=>Number(c.score_0_100)).filter(Number.isFinite).sort((a,b)=>a-b);
+  if(!scores.length) return {min:0,max:0,range:0,cutoff:0,weak:true};
+  const pick=p=>scores[Math.max(0,Math.min(scores.length-1,Math.floor((scores.length-1)*p)))];
+  const min=scores[0], max=scores[scores.length-1], range=max-min;
+  const weak=max<30 || range<3;
+  return {min,max,range,weak,cutoff:weak?pick(0.91):Math.max(pick(0.58),min+range*0.24)};
+}
+function relativeScore(score,stats){
+  const v=Number(score||0);
+  if(!Number.isFinite(v)) return 0;
+  if(!stats || stats.range<0.05) return 1;
+  return Math.max(0,Math.min(1,(v-stats.min)/stats.range));
+}
+function confidenceIsWeak(data,stats){
+  const label=String(data?.summary?.confidence_label || data?.report?.confidence_label || '').toUpperCase();
+  const best=Number(data?.summary?.best_score_0_100);
+  return label==='WEAK' || label==='NO FIX' || (Number.isFinite(best) && best<30) || !!stats?.weak;
+}
+function heatFeatureBundle(hm,data){
+  const stats=scoreStats(hm.cells||[]);
+  const weak=confidenceIsWeak(data,stats);
+  const cells=(hm.cells||[]).filter(cell=>{
+    const score=Number(cell.score_0_100||0);
+    return score>=stats.cutoff || Number(cell.support_groups||0)>0;
+  });
+  const features=cells.map(cell=>{
+    const rel=relativeScore(cell.score_0_100,stats);
+    return {type:'Feature',geometry:{type:'Polygon',coordinates:heatCellPolygon(cell,hm.bounds,hm.cols,hm.rows)},properties:{row:cell.row,col:cell.col,score:Number(cell.score_0_100||0),relative:rel,opacity:(weak?0.07:0.10)+rel*(weak?0.23:0.38),color:colour(rel*100,1),support_groups:Number(cell.support_groups||0)}};
+  });
+  return {features,stats,weak};
+}
+function heatBoundsFeature(bounds){
+  return {type:'Feature',geometry:{type:'Polygon',coordinates:[[[bounds.min_lon,bounds.min_lat],[bounds.max_lon,bounds.min_lat],[bounds.max_lon,bounds.max_lat],[bounds.min_lon,bounds.max_lat],[bounds.min_lon,bounds.min_lat]]]},properties:{}};
+}
+function receiverFeatureBundle(receivers){
+  const buckets=new Map();
+  for(const r of receivers||[]){
+    const lat=Number(r.lat), lon=Number(r.lon);
+    if(!Number.isFinite(lat)||!Number.isFinite(lon)) continue;
+    const key=`${lat.toFixed(6)},${lon.toFixed(6)}`;
+    const item=buckets.get(key)||{lat,lon,items:[]};
+    item.items.push(r); buckets.set(key,item);
+  }
+  return [...buckets.values()].map(group=>{
+    const ids=group.items.map(r=>r.collection_id).filter(x=>x!=null);
+    const maxDbm=Math.max(...group.items.map(r=>Number(r.max_dbm)).filter(Number.isFinite));
+    return {type:'Feature',geometry:{type:'Point',coordinates:[group.lon,group.lat]},properties:{receiver_count:group.items.length,label:ids.join(',')||String(group.items.length),collections:ids.join(','),max_dbm:Number.isFinite(maxDbm)?maxDbm:null}};
+  });
+}
+function candidateFeatureBundle(candidates,weak){
+  const limit=weak?1:5;
+  return (candidates||[]).slice(0,limit).map(c=>({type:'Feature',geometry:{type:'Point',coordinates:[Number(c.lon),Number(c.lat)]},properties:{...c,label:`#${c.rank}`}}));
+}
+function addMappedHeatLayers(){
+  if(!sourceMap.getLayer('source-heat-fill')){
+    sourceMap.addLayer({id:'source-heat-fill',type:'fill',source:'source-heat',paint:{'fill-color':['get','color'],'fill-opacity':['get','opacity']}});
+    sourceMap.addLayer({id:'source-heat-bounds-line',type:'line',source:'source-heat-bounds',paint:{'line-color':'rgba(255,255,255,0.34)','line-width':1,'line-dasharray':[2,2]}});
+  }
+  if(!sourceMap.getLayer('source-receivers')){
+    sourceMap.addLayer({id:'source-receivers',type:'circle',source:'source-receivers',paint:{'circle-radius':['interpolate',['linear'],['get','receiver_count'],1,6,2,9,4,12],'circle-color':'#e8f2ff','circle-stroke-color':'#0b1220','circle-stroke-width':2.5}});
+    sourceMap.addLayer({id:'source-receiver-labels',type:'symbol',source:'source-receivers',layout:{'text-field':['get','label'],'text-size':11,'text-offset':[0,1.25],'text-anchor':'top','text-allow-overlap':true},paint:{'text-color':'#ffffff','text-halo-color':'#0b1220','text-halo-width':1.5}});
+  }
+  if(!sourceMap.getLayer('source-candidates')){
+    sourceMap.addLayer({id:'source-candidates',type:'circle',source:'source-candidates',paint:{'circle-radius':['case',['==',['get','rank'],1],15,11],'circle-color':'rgba(255,209,102,0.10)','circle-stroke-color':['case',['==',['get','rank'],1],'#ffffff','#ffd166'],'circle-stroke-width':['case',['==',['get','rank'],1],3,2]}});
+    sourceMap.addLayer({id:'source-candidate-labels',type:'symbol',source:'source-candidates',layout:{'text-field':['get','label'],'text-size':12,'text-anchor':'center','text-allow-overlap':true},paint:{'text-color':'#ffffff','text-halo-color':'#0b1220','text-halo-width':1.5}});
+  }
+}
+function updateMappedHeatmap(data){
+  pendingMapData=data;
+  initSourceMap();
+  if(!sourceMap || !sourceMapReady || !data?.heatmap?.cells?.length) return false;
+  try{sourceMap.resize();}catch(_){};
+  const hm=data.heatmap, bounds=hm.bounds;
+  const heat=heatFeatureBundle(hm,data);
+  setGeoSource('source-heat',geojson(heat.features));
+  setGeoSource('source-heat-bounds',geojson([heatBoundsFeature(bounds)]));
+  setGeoSource('source-receivers',geojson(receiverFeatureBundle(data.receivers||[])));
+  setGeoSource('source-candidates',geojson(candidateFeatureBundle(data.candidates||[],heat.weak)));
+  addMappedHeatLayers();
+  sourceMap.fitBounds([[bounds.min_lon,bounds.min_lat],[bounds.max_lon,bounds.max_lat]],{padding:{top:56,bottom:44,left:56,right:56},maxZoom:15.5,duration:450});
+  return true;
 }
 function resizeCanvas(){
   const c=$('heatCanvas'); const dpr=window.devicePixelRatio||1; const rect=c.getBoundingClientRect();
@@ -190,6 +311,7 @@ function project(lat, lon, bounds, w, h, pad){
   return [x,y];
 }
 function drawEmpty(text){
+  const box=heatMapBox; if(box) box.classList.add('no-map');
   const {ctx,w,h}=resizeCanvas();
   ctx.clearRect(0,0,w,h); ctx.fillStyle='#08101b'; ctx.fillRect(0,0,w,h);
   ctx.strokeStyle='#223248'; ctx.lineWidth=1;
@@ -202,23 +324,29 @@ function drawEmpty(text){
 function drawHeatmap(data){
   const hm=data.heatmap;
   if(!hm || !hm.cells || !hm.cells.length){drawEmpty(data.state_label);return;}
+  const mapped=updateMappedHeatmap(data);
+  const box=heatMapBox; if(box) box.classList.toggle('no-map',!mapped);
   const {ctx,w,h}=resizeCanvas(); const pad=34; const bounds=hm.bounds;
-  ctx.clearRect(0,0,w,h); ctx.fillStyle='#08101b'; ctx.fillRect(0,0,w,h);
+  ctx.clearRect(0,0,w,h);
+  if(mapped) return;
+  ctx.fillStyle='#08101b'; ctx.fillRect(0,0,w,h);
+  const heat=heatFeatureBundle(hm,data);
   const cw=(w-pad*2)/hm.cols; const ch=(h-pad*2)/hm.rows;
-  for(const cell of hm.cells){
-    const x=pad+cell.col*cw; const y=pad+cell.row*ch;
-    ctx.fillStyle=colour(cell.score_0_100,0.86); ctx.fillRect(x,y,Math.ceil(cw)+0.5,Math.ceil(ch)+0.5);
+  for(const feature of heat.features){
+    const x=pad+feature.properties.col*cw; const y=pad+feature.properties.row*ch;
+    ctx.fillStyle=colour(feature.properties.relative*100,feature.properties.opacity); ctx.fillRect(x,y,Math.ceil(cw)+0.5,Math.ceil(ch)+0.5);
   }
-  ctx.strokeStyle='#8ea3ba'; ctx.lineWidth=1; ctx.strokeRect(pad,pad,w-pad*2,h-pad*2);
-  for(const r of data.receivers||[]){
-    const [x,y]=project(r.lat,r.lon,bounds,w,h,pad);
-    ctx.beginPath(); ctx.arc(x,y,5,0,Math.PI*2); ctx.fillStyle='#dcecff'; ctx.fill(); ctx.strokeStyle='#0b1220'; ctx.lineWidth=2; ctx.stroke();
-    ctx.fillStyle='#f1f5f9'; ctx.font='11px Arial'; ctx.fillText(String(r.collection_id),x+8,y-7);
+  ctx.strokeStyle='rgba(255,255,255,.34)'; ctx.setLineDash([4,4]); ctx.lineWidth=1; ctx.strokeRect(pad,pad,w-pad*2,h-pad*2); ctx.setLineDash([]);
+  for(const r of receiverFeatureBundle(data.receivers||[])){
+    const [x,y]=project(r.geometry.coordinates[1],r.geometry.coordinates[0],bounds,w,h,pad);
+    const count=Number(r.properties.receiver_count||1);
+    ctx.beginPath(); ctx.arc(x,y,5+Math.min(5,count*2),0,Math.PI*2); ctx.fillStyle='#dcecff'; ctx.fill(); ctx.strokeStyle='#0b1220'; ctx.lineWidth=2; ctx.stroke();
+    ctx.fillStyle='#f1f5f9'; ctx.font='700 11px Arial'; ctx.fillText(r.properties.label,x+9,y+16);
   }
-  for(const c of (data.candidates||[]).slice(0,5)){
-    const [x,y]=project(c.lat,c.lon,bounds,w,h,pad);
-    ctx.beginPath(); ctx.arc(x,y,11+(6-c.rank),0,Math.PI*2); ctx.strokeStyle=c.rank===1?'#ffffff':'#ffd166'; ctx.lineWidth=c.rank===1?3:2; ctx.stroke();
-    ctx.fillStyle='#ffffff'; ctx.font='700 12px Arial'; ctx.fillText(String(c.rank),x+12,y+4);
+  for(const c of candidateFeatureBundle(data.candidates||[],heat.weak)){
+    const [x,y]=project(c.geometry.coordinates[1],c.geometry.coordinates[0],bounds,w,h,pad);
+    ctx.beginPath(); ctx.arc(x,y,c.properties.rank===1?15:11,0,Math.PI*2); ctx.strokeStyle=c.properties.rank===1?'#ffffff':'#ffd166'; ctx.lineWidth=c.properties.rank===1?3:2; ctx.stroke();
+    ctx.fillStyle='#ffffff'; ctx.font='700 12px Arial'; ctx.fillText(c.properties.label,x+12,y+4);
   }
   ctx.fillStyle='#d7e2ed'; ctx.font='11px Arial';
   ctx.fillText(`${bounds.min_lat.toFixed(5)}, ${bounds.min_lon.toFixed(5)}`,pad,h-10);
@@ -229,8 +357,10 @@ function render(data){
   const s=data.summary||{};
   const ready=!!data.analysis_ready;
   const suspiciousInput=data.input_event_type!=='all_matching_rf_detections';
-  $('stateBadge').className='badge '+(ready?'good':(data.state==='no_events'||data.state==='no_concurrent_captures'?'bad':'check'));
-  $('stateBadge').textContent=data.state_label||data.state||'Unknown';
+  const confidence=String(s.confidence_label || data.report?.confidence_label || '').toUpperCase();
+  const weakConfidence=confidence==='WEAK' || confidence==='NO FIX' || (s.best_score_0_100!=null && Number(s.best_score_0_100)<30);
+  $('stateBadge').className='badge '+(ready&&!weakConfidence?'good':(ready?'check':(data.state==='no_events'||data.state==='no_concurrent_captures'?'bad':'check')));
+  $('stateBadge').textContent=(data.state_label||data.state||'Unknown')+(confidence?` (${confidence})`:'');
   $('generated').textContent=data.generated_utc||'-';
   $('kpiGroups').textContent=s.concurrent_group_count??'-';
   $('kpiEligible').textContent=s.eligible_group_count??'-';
@@ -243,6 +373,7 @@ function render(data){
     `Ping selection: ${data.suspicious_ping_policy?.enabled?'suspicious only':'all matching RF'}${data.suspicious_ping_policy?.threshold_dbm==null?'':`; threshold ${data.suspicious_ping_policy.threshold_dbm} dBm`}`,
     `Concurrent rule: ${data.config?.time_bucket_s}s time bucket, ${(Number(data.config?.frequency_bin_hz||0)/1000000).toFixed(3)} MHz frequency bin, ${data.config?.min_collections||2}+ collections`,
     `Receiver spread minimum: ${data.config?.min_receiver_spread_m??0} m`,
+    `Map display: ${weakConfidence?'weak/flat fit, showing top relative cells only':'relative heat overlay'}`,
     `AOI: ${filters.aoi||'mission'}; rows cap: ${filters.max_rows||'-'}`,
     ...(data.limitations||[])
   ];
@@ -260,21 +391,28 @@ function render(data){
   drawHeatmap(data);
 }
 async function loadHeatmap(){
+  const progress = window.LanternProgress;
   try{
-    $('statusText').textContent='Loading source-location evidence...';
+    if (progress) progress.begin('Loading source map', 8);
+    $('statusText').textContent='Source-location analysis is loading; progress is shown in the page header.';
     drawEmpty('Loading heat map...');
+    if (progress) progress.update(28, 'Requesting heat map evidence');
     const data=await json('/api/source-location/heatmap?'+params());
+    if (progress) progress.update(72, 'Drawing heat map');
     render(data);
+    if (progress) progress.done('Source map loaded');
   }catch(e){
     $('statusText').innerHTML='<div class="error">'+esc(e.message||e)+'</div>';
     drawEmpty('Source-location load failed.');
+    if (progress) progress.error('Source map failed');
   }
 }
 window.addEventListener('resize',()=>{if(latestData)drawHeatmap(latestData);else drawEmpty('No heat map loaded.');},{passive:true});
 document.addEventListener('keydown',e=>{if(e.key==='Enter' && e.target && ['INPUT','SELECT'].includes(e.target.tagName)){e.preventDefault();loadHeatmap();}});
 setupPageMode();
+initSourceMap();
 loadHeatmap();
 </script>
-<script src="/static/platform_shell.js?v=0127" defer></script>
+<script src="/static/platform_shell.js?v=0134" defer></script>
 </body>
 </html>

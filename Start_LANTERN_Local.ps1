@@ -53,6 +53,28 @@ if (-not (Test-LanternRuntime -PythonPath $py)) {
 }
 if (-not (Test-LanternRuntime -PythonPath $py)) { throw "LANTERN runtime is still not usable at $py" }
 
+
+function Open-LanternAppWindow {
+  param([string]$Url)
+
+  $browserCandidates = @(
+    "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
+    "${env:ProgramFiles}\Microsoft\Edge\Application\msedge.exe",
+    "${env:LOCALAPPDATA}\Microsoft\Edge\Application\msedge.exe",
+    "${env:ProgramFiles}\Google\Chrome\Application\chrome.exe",
+    "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+    "${env:LOCALAPPDATA}\Google\Chrome\Application\chrome.exe"
+  )
+
+  $browser = $browserCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+  if ($browser) {
+    Start-Process -FilePath $browser -ArgumentList @("--app=$Url", "--new-window")
+    return
+  }
+
+  Start-Process $Url
+}
+
 # Stop stale local server on the requested port, if Windows exposes the TCP table.
 if (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue) {
   Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue |
@@ -111,9 +133,9 @@ if ($ready) {
 
 if (-not $NoBrowser) {
   try {
-    Start-Process $url
+    Open-LanternAppWindow -Url $url
   } catch {
-    Write-Host "Could not open browser automatically. Open this URL manually:" -ForegroundColor Yellow
+    Write-Host "Could not open standalone browser window automatically. Open this URL manually:" -ForegroundColor Yellow
     Write-Host $url -ForegroundColor Cyan
   }
 }

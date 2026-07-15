@@ -1,4 +1,5 @@
-﻿#lantern-flow-nav {
+#lantern-flow-nav {
+  display: none !important;
   position: fixed;
   top: 12px;
   left: 12px;

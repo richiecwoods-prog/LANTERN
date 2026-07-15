@@ -1,11 +1,11 @@
-﻿param(
-  [string]$Url = "http://127.0.0.1:8000/?v=060"
+param(
+  [string]$Url = "http://127.0.0.1:8000/app?v=0122"
 )
 
 $ErrorActionPreference = "Stop"
 
 $healthUrl = "http://127.0.0.1:8000/docs"
-$backendScript = "C:\MOTH\Start_MOTH_Local.ps1"
+$backendScript = Join-Path $PSScriptRoot "Start_LANTERN_Local.ps1"
 
 function Test-LanternUrl {
   param([string]$TestUrl)

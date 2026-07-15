@@ -17,6 +17,7 @@
     h3 { font-size:13px; margin:12px 0 6px 0; color:#fff; }
     label { display:block; color:var(--muted); font-size:12px; margin-top:8px; }
     input, select, button { width:100%; padding:8px; border-radius:7px; border:1px solid #424b59; background:#111720; color:var(--text); }
+    input[type="datetime-local"] { color-scheme: dark; }
     select[multiple] { min-height:118px; }
     button { cursor:pointer; font-weight:700; background:#2a3340; margin-top:8px; touch-action:manipulation; }
     button:hover { background:#354153; }
@@ -43,9 +44,9 @@
     @media (max-width: 1100px) { main { grid-template-columns:1fr; } .cards { grid-template-columns:1fr; } .grid2 { grid-template-columns:1fr; } }
   </style>
   <link rel="stylesheet" href="/static/lantern_nav.css" />
-  <link rel="stylesheet" href="/static/platform_shell.css?v=0127" />
+  <link rel="stylesheet" href="/static/platform_shell.css?v=0134" />
 </head>
-<body>
+<body><script data-eei-shell-early src="/static/platform_shell.js?v=0134"></script>
 <header>
   <h1>MOTH UAS RF Launch Window Analysis</h1>
   <span class="pill">Companion v0.7.0</span>
@@ -64,8 +65,8 @@
     </div>
 
     <div class="row">
-      <div><label>Start UTC</label><input id="startUtc" placeholder="optional" /></div>
-      <div><label>End UTC</label><input id="endUtc" placeholder="optional" /></div>
+      <div><label>Start UTC</label><input id="startUtc" type="datetime-local" step="60" min="2020-01-01T00:00" max="2035-12-31T23:59" title="UTC date/time" /></div>
+      <div><label>End UTC</label><input id="endUtc" type="datetime-local" step="60" min="2020-01-01T00:00" max="2035-12-31T23:59" title="UTC date/time; leave blank for latest" /></div>
     </div>
     <div class="row3">
       <div><label>Bucket min</label><input id="bucketMinutes" type="number" value="30" min="1" /></div>
@@ -151,13 +152,14 @@ const colours = { L1:'#5aa9ff', L2:'#ffd166', L5:'#b48cff', L3:'#ff7ab6' };
 function status(msg) { document.getElementById('status').textContent = msg; }
 function esc(s) { return String(s ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
 function val(id) { return String(document.getElementById(id).value || '').trim(); }
+function utcVal(id,end=false){const v=val(id);if(!v)return'';if(v.endsWith('Z'))return v;return v.length===16?`${v}:${end?'59':'00'}Z`:`${v}Z`;}
 function selectedIds() { return Array.from(document.getElementById('collections').selectedOptions).map(o => o.value); }
 function query(extra={}) {
   const p = new URLSearchParams();
   const ids = selectedIds();
   if (ids.length) p.set('collection_ids', ids.join(','));
-  if (val('startUtc')) p.set('start_utc', val('startUtc'));
-  if (val('endUtc')) p.set('end_utc', val('endUtc'));
+  if (utcVal('startUtc')) p.set('start_utc', utcVal('startUtc'));
+  if (utcVal('endUtc', true)) p.set('end_utc', utcVal('endUtc', true));
   if (val('bucketMinutes')) p.set('bucket_minutes', val('bucketMinutes'));
   if (val('gnssWidthMhz')) p.set('gnss_width_mhz', val('gnssWidthMhz'));
   if (val('targetMinHz')) p.set('target_min_hz', val('targetMinHz'));
@@ -282,6 +284,6 @@ document.addEventListener('click', e=>{ const b=e.target.closest && e.target.clo
 (async function init(){ try { await loadHealth(); await loadCollections(); status('Ready. Select scans or leave blank for all scans, then run RF analysis.'); } catch(e) { status('Startup failed: '+e.message); } })();
 </script>
   <script src="/static/lantern_nav.js"></script>
-  <script src="/static/platform_shell.js?v=0127" defer></script>
+  <script src="/static/platform_shell.js?v=0134" defer></script>
 </body>
 </html>

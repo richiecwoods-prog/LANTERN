@@ -15,6 +15,7 @@
   .panel { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:14px; }
   label { display:block; font-size:12px; color:#bbb; margin-top:8px; }
   input, select, button { width:100%; box-sizing:border-box; padding:8px; background:#0f1115; color:#eee; border:1px solid #444; border-radius:6px; }
+  input[type="datetime-local"] { color-scheme: dark; }
   button { cursor:pointer; font-weight:700; margin-top:8px; background:#2a3440; touch-action: manipulation; }
   button:hover { background:#344355; }
   .primary { background:#176236; }
@@ -53,8 +54,8 @@
     <label>Collections / scan IDs, comma-separated</label>
     <input id="collectionIds" placeholder="blank = all scans" />
     <div class="grid">
-      <div><label>Start UTC</label><input id="startUtc" placeholder="2026-05-08T06:00:00Z" /></div>
-      <div><label>End UTC</label><input id="endUtc" placeholder="blank = latest" /></div>
+      <div><label>Start UTC</label><input id="startUtc" type="datetime-local" step="60" min="2020-01-01T00:00" max="2035-12-31T23:59" title="UTC date/time" /></div>
+      <div><label>End UTC</label><input id="endUtc" type="datetime-local" step="60" min="2020-01-01T00:00" max="2035-12-31T23:59" title="UTC date/time; leave blank for latest" /></div>
     </div>
     <div class="grid">
       <div><label>Graph bin minutes</label><input id="binMinutes" type="number" min="1" max="240" value="30" /></div>
@@ -131,12 +132,23 @@
 <script>
 const api = location.origin;
 let lastGnss = null, lastSpectrum = null, lastWindows = null;
+function queryValue(field) {
+  const el = document.getElementById(field);
+  const v = el.value.trim();
+  if (!v) return '';
+  if (el.type === 'datetime-local') {
+    if (v.endsWith('Z')) return v;
+    if (field === 'endUtc') return v.length === 16 ? `${v}:59Z` : `${v}Z`;
+    return v.length === 16 ? `${v}:00Z` : `${v}Z`;
+  }
+  return v;
+}
 function q(extra={}) {
   const p = new URLSearchParams();
   const ids = document.getElementById('collectionIds').value.trim();
   if (ids) p.set('collection_ids', ids);
   for (const [field, name] of [['startUtc','start_utc'],['endUtc','end_utc'],['candidateId','candidate_id'],['radiusM','radius_m'],['widthMhz','width_mhz'],['spikeDbm','spike_dbm'],['maxRows','max_rows']]) {
-    const v = document.getElementById(field).value.trim(); if (v) p.set(name, v);
+    const v = queryValue(field); if (v) p.set(name, v);
   }
   for (const [k,v] of Object.entries(extra)) if (v !== undefined && v !== null && v !== '') p.set(k, v);
   return p.toString();

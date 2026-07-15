@@ -9,7 +9,7 @@
   <style>
     body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, sans-serif; background: #111; color: #eee; }
     #map { position: absolute; top: 0; bottom: 0; width: 100%; }
-    #panel { position: absolute; top: 12px; left: 12px; width: 455px; max-height: calc(100vh - 24px); overflow: auto; background: rgba(20,20,20,.94); border-radius: 10px; padding: 14px; box-shadow: 0 4px 18px rgba(0,0,0,.45); z-index: 2; }
+    #panel { position: absolute; top: 12px; left: 12px; width: 455px; max-height: calc(100vh - 24px); overflow: auto; background: rgba(20,20,20,.94); border-radius: 10px; padding: 14px; box-shadow: 0 4px 18px rgba(0,0,0,.45); z-index: 2; display:flex; flex-direction:column; }
     #graphWindow, #assessmentWindow { position: absolute; top: 12px; right: 12px; width: 680px; max-width: calc(100vw - 500px); background: rgba(18,18,18,.96); border: 1px solid #444; border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.55); padding: 12px; z-index: 3; display: none; }
     #assessmentWindow { top: 380px; max-height: calc(100vh - 400px); overflow: auto; }
     #graphCanvas { width: 100%; height: 310px; background: #0f0f0f; border: 1px solid #333; border-radius: 6px; }
@@ -56,8 +56,6 @@
     .max { background: #5ec8ff; }
     .count { background: #777; }
     .clickable { cursor: pointer; }
-    #quickActions { position: absolute; top: 12px; left: 485px; right: 12px; display: flex; gap: 8px; align-items: center; z-index: 3; pointer-events: none; }
-    #quickActions button { width: auto; min-width: 150px; margin-top: 0; pointer-events: auto; box-shadow: 0 3px 14px rgba(0,0,0,.45); }
     .primary { background: #12633a; border-color: #2ca35c; color: #fff; }
     .primary:hover { background: #168a4e; }
     .secondary { background: #2b4058; border-color: #4a6f99; color: #fff; }
@@ -83,17 +81,36 @@
     .mode-banner { border:1px solid #41566e; border-left:5px solid #48a6ff; border-radius:8px; padding:9px; margin:9px 0; background:linear-gradient(90deg,rgba(30,82,124,.48),rgba(18,24,32,.82)); }
     .mode-banner b { display:block; font-size:13px; color:#f0f6ff; }
     .mode-banner span { display:block; color:#b7c7d8; font-size:11px; margin-top:2px; }
+    .mode-copy { border:1px solid #344657; border-radius:8px; padding:9px; margin:0 0 9px 0; background:#151b22; color:#d9e7f5; font-size:12px; line-height:1.35; }
+    .mode-copy b { display:block; color:#fff; font-size:13px; margin-bottom:3px; }
+    .mode-copy span { color:#b7c7d8; }
+    .h3-workflow, .candidate-workflow { display:none !important; }
+    body.map-mode-h3 .h3-workflow { display:block !important; }
+    body.map-mode-candidates .candidate-workflow { display:block !important; }
+    body.map-mode-candidates .candidate-workflow.actionbar { display:grid !important; }
     body.map-mode-candidates #panel { border-left:5px solid #9b5cff; }
     body.map-mode-candidates .mode-banner { border-left-color:#9b5cff; background:linear-gradient(90deg,rgba(70,42,114,.58),rgba(18,24,32,.82)); }
     body.map-mode-candidates #plainSummary { border-color:#6f56a5; background:#181326; }
-    body.map-mode-candidates #quickActions .secondary { background:#35234f; border-color:#745aa5; }
     body.map-mode-h3 #panel { border-left:5px solid #48a6ff; }
     body.map-mode-h3 .mode-banner { border-left-color:#48a6ff; }
+    .candidate-focus-panel { border-color:#6f56a5; background:linear-gradient(180deg,rgba(54,38,84,.82),rgba(20,19,28,.96)); }
+    .candidate-focus-panel .actionbar, .h3-focus-panel .actionbar { margin-top:8px; }
+    .candidate-tools { border:1px solid #3b4050; border-radius:8px; padding:9px; margin-top:10px; background:#151515; }
+    body.map-mode-candidates .candidate-tools { border-color:#6f56a5; background:#181326; }
+    body.map-mode-candidates #decisionCards .decision-card { border-color:#5e4d86; }
+    .survey-layer-controls, .candidate-ranking { border:1px solid #344657; border-radius:8px; padding:9px; margin-top:12px; background:#131920; }
+    body.map-mode-h3 .survey-layer-controls { border-color:#41566e; }
+    body.map-mode-candidates .candidate-ranking { border-color:#6f56a5; background:#181326; }
+    body.map-mode-h3 #candidateTools, body.map-mode-h3 #candidateRankingBlock { display:none !important; }
+    body.map-mode-candidates #surveyLayerControls { display:none !important; }
+    body.map-mode-h3 .candidate-layer-only { display:none !important; }
 
     #compareWindow { position: absolute; top: 12px; right: 12px; width: 760px; max-width: calc(100vw - 500px); max-height: calc(100vh - 24px); overflow:auto; background: rgba(18,18,18,.96); border: 1px solid #444; border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.55); padding: 12px; z-index: 4; display: none; }
     .banner { border-radius: 8px; padding: 9px; margin-top: 8px; font-size: 12px; border: 1px solid #5a4a22; background: rgba(80,60,20,.45); color: #ffe7a5; }
     .banner.good { border-color:#2c7046; background: rgba(25,80,45,.35); color:#c8ffd4; }
     .briefing-switch { display:grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+    .briefing-switch .wide { grid-column: 1 / -1; }
+    .report-links { display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:8px; }
     .comparison-grid { display:grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
     .comparison-card { border:1px solid #444; border-radius: 10px; padding: 10px; background:#151515; min-height: 210px; }
     .comparison-card h3 { margin-top:0; font-size:15px; }
@@ -101,25 +118,16 @@
     .metric-row b { color:#ddd; }
     body.briefing #technicalControls { display:none; }
     body.briefing #panel { width: 390px; }
-    body.briefing #quickActions { left: 420px; }
     body.briefing #summary, body.briefing #status { max-height: 120px; overflow:auto; }
     body.briefing .hide-in-briefing { display:none !important; }
     .confidence-bar { background: linear-gradient(90deg, #343434, #5b83c9, #25c7ff); }
     .report-actions { display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; }
     .report-actions button { width:auto; margin-top:0; }
   </style>
-  <link rel="stylesheet" href="/static/platform_shell.css?v=0127" />
+  <link rel="stylesheet" href="/static/platform_shell.css?v=0134" />
 </head>
-<body>
+<body><script data-eei-shell-early src="/static/platform_shell.js?v=0134"></script>
 <div id="map"></div>
-<div id="quickActions">
-  <button type="button" class="primary" onclick="openGraph()">Graph current view</button>
-  <button type="button" class="secondary" onclick="graphSelectedCandidate()">Graph selected candidate</button>
-  <button type="button" class="secondary" onclick="assessSelectedCandidate()">Assess selected candidate</button>
-  <button type="button" class="secondary" onclick="compareTopCandidates()">Compare top candidates</button>
-  <button type="button" onclick="refreshAll({reloadTimeBounds:true})">Refresh map</button>
-</div>
-
 <div id="graphWindow">
   <div class="graph-head">
     <div><b id="graphTitle">Filtered MOTH data graph</b><div id="graphSub" class="mini">Average/min/max dBm and event count for the currently selected map filters.</div></div>
@@ -151,16 +159,12 @@
   <div id="compareContent" class="report-card">No comparison loaded yet.</div>
 </div>
 <div id="panel">
-  <h1>MOTH Data Analysis <span class="version">UI v0.6.0</span></h1>
-  <div id="modeBanner" class="mode-banner"><b id="modeTitle">Map / H3 Layers</b><span id="modeSub">AOI, H3 cells, RF burden and raw spatial evidence</span></div>
-  <div class="muted">Multi-scan RF overlay for MOTH/LAMP CSV data. The main view is now small hexagons: green = better antenna-placement evidence, amber = check, red = poor/unproven. Raw points are optional because they block the map.</div>
-  <button class="primary big-action" type="button" onclick="openGraph()">Show line graph for current map filters</button>
-  <div class="actionbar">
-    <button type="button" onclick="openGraph()">Overall line graph</button>
-    <button type="button" onclick="graphSelectedCandidate()">Selected candidate graph</button>
-    <button type="button" onclick="assessSelectedCandidate()">Candidate assessment</button>
-  </div>
-  <div class="briefing-switch"><button type="button" onclick="toggleBriefingMode()">Toggle briefing mode</button><button type="button" onclick="compareTopCandidates()">Compare top 3</button></div>
+  <h1>MOTH Data Analysis <span class="version">UI v0.6.1</span></h1>
+  <div id="modeBanner" class="mode-banner"><b id="modeTitle">Survey Map</b><span id="modeSub">AOI, H3 cells, RF burden and raw spatial evidence</span></div>
+  <div class="mode-copy h3-workflow h3-focus-panel"><b>Survey evidence workspace</b><span>AOI-filtered H3 layers, RF burden, confidence and raw spatial evidence are primary here. Candidate scoring is kept on Candidate Engineering.</span></div>
+  <div class="mode-copy candidate-workflow candidate-focus-panel"><b>Candidate engineering workspace</b><span>Candidate pins, ranking, comparison and assessment are primary here. Survey H3 controls stay on the Survey Map.</span><button class="primary big-action" type="button" onclick="scoreSites()">Score candidate pins</button><div class="actionbar"><button type="button" onclick="compareTopCandidates()">Compare top 3</button><button type="button" onclick="graphSelectedCandidate()">Selected graph</button><button type="button" onclick="assessSelectedCandidate()">Assessment</button></div></div>
+  <div class="h3-workflow"><button class="primary big-action" type="button" onclick="openGraph()">Show line graph for current map filters</button><div class="actionbar"><button type="button" onclick="openGraph()">Overall line graph</button><button type="button" onclick="toggleBriefingMode()">Briefing mode</button><button type="button" onclick="refreshAll({reloadTimeBounds:true})">Refresh map</button></div></div>
+  <div class="candidate-workflow actionbar"><button type="button" onclick="startCandidatePick()">Pick candidate on map</button><button type="button" onclick="refreshAll({reloadTimeBounds:true})">Refresh map</button><button type="button" onclick="toggleBriefingMode()">Briefing mode</button></div>
   <div id="plainSummary" class="status">Plain-English map summary will appear after data loads.</div>
   <div id="decisionCards" class="decision-grid"></div>
   <div id="limitationsBanner" class="banner">Data warnings will appear after data loads.</div>
@@ -179,31 +183,10 @@
   <div id="mapAoiResults" class="muted">AOI search results will appear here.</div>
 
   <div id="technicalControls">
-  <h2>Import one or more MOTH CSV files</h2>
-  <form id="uploadForm">
-    <label>CSV file(s)</label>
-    <input name="files" id="fileInput" type="file" accept=".csv" multiple required />
-    <label>Collection name prefix</label>
-    <input name="collection_name_prefix" placeholder="Lincoln HQ survey" />
-    <div class="row">
-      <div>
-        <label>Device serial / group</label>
-        <input name="device_serial" placeholder="D1 / D2 / D3 / mixed" />
-      </div>
-      <div>
-        <label>Threshold dB</label>
-        <input name="detection_threshold_db" type="number" step="1" placeholder="10" />
-      </div>
-    </div>
-    <label>Scan mode</label>
-    <input name="scan_mode" placeholder="LAMP CSV / custom range / AOI filtered" />
-    <label>Operator notes</label>
-    <textarea name="operator_notes" rows="2" placeholder="Antenna height, orientation, vehicle/foot survey, weather, etc."></textarea>
-    <label><input name="white_list_enabled" type="checkbox" /> White List enabled</label>
-    <button type="submit">Import selected CSVs</button>
-  </form>
-
   <h2>Loaded scans</h2>
+  <div class="status">Add CSV files, live sensor sessions and future map/elevation data in Ingest. This map only analyses collections that have already been loaded.</div>
+  <button type="button" class="secondary" onclick="window.top.location.href='/ingest/upload?v=0122'">Open Ingest data upload</button>
+  <div class="report-links"><button type="button" onclick="window.top.location.href='/reporting/j2?v=0122'">Open J2 report</button><button type="button" onclick="window.top.location.href='/reporting/flight-safety?v=0122'">Flight safety brief</button></div>
   <div class="toolbar">
     <button type="button" onclick="selectAllCollections(true)">Select all</button>
     <button type="button" onclick="selectAllCollections(false)">Select none</button>
@@ -263,7 +246,8 @@
   <div id="timeWindowLabel" class="status">Time span not loaded yet.</div>
   <div class="inline-note muted"><b>Timeline meaning:</b> the app groups target-band detections into time buckets and checks whether a candidate looks stable, variable, sparse or intermittent. It is a stability cue, not proof of continuous coverage, because MOTH logs detected events.</div>
 
-  <h2>Layers</h2>
+  <section id="surveyLayerControls" class="h3-workflow survey-layer-controls">
+  <h2>Survey map layers</h2>
   <div class="row3">
     <div>
       <label>H3 res</label>
@@ -282,26 +266,25 @@
   <label><input id="showConfidence" type="checkbox" /> Evidence confidence overlay</label>
   <label><input id="showH3" type="checkbox" /> Optional raw RF strength hexagons</label>
   <label><input id="showRaw" type="checkbox" /> Raw detection markers</label>
-  <label><input id="showCandidates" type="checkbox" checked /> Candidate site pins</label>
+  <label class="candidate-layer-only"><input id="showCandidates" type="checkbox" checked /> Candidate site pins</label>
   <label><input id="showPlainLabels" type="checkbox" checked /> Plain-English GOOD / CHECK / POOR labels</label>
   <div class="legend"><div class="bar suitability-bar"></div><div class="muted"><b>Main hexagons:</b> <span class="big-good">green = shortlist</span>, <span class="big-check">amber = check</span>, <span class="big-poor">red = weak/unproven</span>. Smaller cells are used by default to avoid broad misleading colour blocks.</div></div>
   <div class="legend"><div class="bar confidence-bar"></div><div class="muted">Confidence overlay: darker = sparse evidence, bright blue = many matching target-band detections. It measures evidence quantity, not signal quality.</div></div>
   <div class="legend"><div class="bar rf-bar"></div><div class="muted">Optional RF-strength hexagons: red/orange = weaker average dBm, yellow = mid, green = stronger average dBm.</div></div>
-  <div class="inline-note muted"><span class="pill"><i class="swatch purple"></i>purple dots</span> are candidate antenna sites. Raw detection markers are off by default to avoid blocking the map.</div>
-  <button type="button" onclick="refreshAll({reloadTimeBounds:true})">Refresh map</button>
-  <button type="button" onclick="scoreSites()">Score candidate pins</button>
-  <button type="button" onclick="compareTopCandidates()">Compare top candidates</button>
-  <button type="button" onclick="openGraph()">Show overall line graph</button>
+  <div class="inline-note muted candidate-layer-only"><span class="pill"><i class="swatch purple"></i>purple dots</span> are candidate antenna sites. Raw detection markers are off by default to avoid blocking the map.</div>
+  </section>
 
-  <h2>Add candidate antenna site</h2>
-  <div class="actionbar"><button type="button" onclick="startCandidatePick()">Pick lat/lon by clicking map</button><button type="button" onclick="graphSelectedCandidate()">Graph selected</button><button type="button" class="danger" onclick="clearCandidates()">Clear candidates</button></div>
-  <form id="candidateForm">
-    <label>Name</label><input name="name" placeholder="Candidate A" required />
-    <div class="row"><div><label>Lat</label><input name="lat" type="number" step="0.000001" required /></div><div><label>Lon</label><input name="lon" type="number" step="0.000001" required /></div></div>
-    <div class="row"><div><label>Antenna height AGL m</label><input name="antenna_height_agl_m" type="number" step="0.1" /></div><div><label>Practical score 0-1</label><input name="practical_score" type="number" step="0.1" value="0.5" /></div></div>
-    <label>Notes</label><input name="site_notes" />
-    <button type="submit">Add candidate</button>
-  </form>
+  <section id="candidateTools" class="candidate-tools candidate-workflow">
+    <h2>Add candidate antenna site</h2>
+    <div class="actionbar"><button type="button" onclick="startCandidatePick()">Pick lat/lon by clicking map</button><button type="button" onclick="graphSelectedCandidate()">Graph selected</button><button type="button" class="danger" onclick="clearCandidates()">Clear candidates</button></div>
+    <form id="candidateForm">
+      <label>Name</label><input name="name" placeholder="Candidate A" required />
+      <div class="row"><div><label>Lat</label><input name="lat" type="number" step="0.000001" required /></div><div><label>Lon</label><input name="lon" type="number" step="0.000001" required /></div></div>
+      <div class="row"><div><label>Antenna height AGL m</label><input name="antenna_height_agl_m" type="number" step="0.1" /></div><div><label>Practical score 0-1</label><input name="practical_score" type="number" step="0.1" value="0.5" /></div></div>
+      <label>Notes</label><input name="site_notes" />
+      <button type="submit">Add candidate</button>
+    </form>
+  </section>
 
   </div>
 
@@ -311,11 +294,17 @@
   <h2>Summary</h2>
   <div id="summary" class="status">No data loaded.</div>
 
-  <h2>Candidate ranking</h2>
-  <div id="scores" class="status">No candidate sites scored yet.</div>
+  <section id="candidateRankingBlock" class="candidate-workflow candidate-ranking">
+    <h2>Candidate ranking</h2>
+    <div id="scores" class="status">No candidate sites scored yet.</div>
+  </section>
 
   <h2>Status</h2>
-  <div id="status" class="status">Ready.</div>
+  <div id="status" class="map-load-progress done" role="status" aria-live="polite">
+    <div class="map-load-row"><span id="mapLoadLabel" class="map-load-label">Map ready</span><span id="mapLoadPercent" class="map-load-percent">100%</span></div>
+    <div class="map-load-track"><span id="mapLoadFill" class="map-load-fill" style="width:100%"></span></div>
+    <div id="mapLoadDetail" class="map-load-detail">Waiting for map filters.</div>
+  </div>
 </div>
 <script>
 const api = location.origin;
@@ -343,16 +332,34 @@ function workspaceMode() {
 
 function applyWorkspaceMode() {
   const mode = workspaceMode();
+  document.body.classList.remove('map-mode-h3', 'map-mode-candidates');
   document.body.classList.add(`map-mode-${mode}`);
   document.body.dataset.mapMode = mode;
+  document.title = mode === 'candidates' ? 'LANTERN Candidate Engineering' : 'LANTERN Survey Map';
   const title = document.getElementById('modeTitle');
   const sub = document.getElementById('modeSub');
+  const selected = document.getElementById('selectedDetails');
+  const setChecked = (id, on) => { const el = document.getElementById(id); if (el) el.checked = !!on; };
   if (mode === 'candidates') {
     if (title) title.textContent = 'Candidate Engineering';
     if (sub) sub.textContent = 'Candidate pins, scoring, comparison and assessment evidence';
+    if (selected) selected.textContent = 'Click a candidate pin or confidence cell to inspect candidate evidence. Candidate selections enable graph and assessment actions.';
+    setChecked('showSuitability', false);
+    setChecked('showConfidence', true);
+    setChecked('showH3', false);
+    setChecked('showRaw', false);
+    setChecked('showCandidates', true);
+    setChecked('showPlainLabels', false);
   } else {
-    if (title) title.textContent = 'Map / H3 Layers';
+    if (title) title.textContent = 'Survey Map';
     if (sub) sub.textContent = 'AOI, H3 cells, RF burden and raw spatial evidence';
+    if (selected) selected.textContent = 'Click an H3 cell, suitability area, confidence cell or raw marker to inspect survey evidence. Candidate scoring is handled on Candidate Engineering.';
+    setChecked('showSuitability', true);
+    setChecked('showConfidence', true);
+    setChecked('showH3', true);
+    setChecked('showRaw', false);
+    setChecked('showCandidates', false);
+    setChecked('showPlainLabels', true);
   }
 }
 
@@ -377,7 +384,33 @@ const map = new maplibregl.Map({
 });
 map.addControl(new maplibregl.NavigationControl());
 
-function setStatus(msg) { document.getElementById('status').textContent = msg; }
+function setMapLoadProgress(percent, label, detail='', state='loading') {
+  const pct = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+  const box = document.getElementById('status');
+  if (!box) return;
+  box.classList.toggle('loading', state === 'loading');
+  box.classList.toggle('done', state === 'done');
+  box.classList.toggle('error', state === 'error');
+  const labelEl = document.getElementById('mapLoadLabel');
+  const pctEl = document.getElementById('mapLoadPercent');
+  const fillEl = document.getElementById('mapLoadFill');
+  const detailEl = document.getElementById('mapLoadDetail');
+  if (labelEl && label) labelEl.textContent = String(label).replace(/\s+/g, ' ').trim().slice(0, 64);
+  if (pctEl) pctEl.textContent = `${pct}%`;
+  if (fillEl) fillEl.style.width = `${pct}%`;
+  if (detailEl && detail) detailEl.textContent = String(detail).replace(/\s+/g, ' ').trim().slice(0, 96);
+}
+const mapLoadProgress = {
+  begin(label, percent=5) { setMapLoadProgress(percent, label, label, 'loading'); },
+  update(percent, label) { setMapLoadProgress(percent, label, label, 'loading'); },
+  done(label) { setMapLoadProgress(100, label || 'Map loaded', label || 'Map data loaded into the main window.', 'done'); },
+  error(label) { setMapLoadProgress(100, label || 'Map load failed', label || 'Map load failed.', 'error'); },
+  note(label) {
+    const detailEl = document.getElementById('mapLoadDetail');
+    if (detailEl && label) detailEl.textContent = String(label).replace(/\s+/g, ' ').trim().slice(0, 96);
+  }
+};
+function setStatus(msg) { mapLoadProgress.note(String(msg).split('\n')[0]); }
 function valOrEmpty(id) { return document.getElementById(id).value.trim(); }
 function checked(id) { return document.getElementById(id).checked; }
 function esc(x) { return String(x ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
@@ -767,33 +800,41 @@ function disableTimeWindow() {
 
 async function refreshAll(options={}) {
   const reloadTimeBounds = !!options.reloadTimeBounds || !timeBounds;
+  const progress = mapLoadProgress;
   try {
+    if (progress) progress.begin('Loading map layers', 6);
     setStatus('Refreshing map...');
-    if (reloadTimeBounds) await updateTimeBounds();
+    if (reloadTimeBounds) { if (progress) progress.update(14, 'Reading time window'); await updateTimeBounds(); }
     updateTimeWindowLabel();
+    if (progress) progress.update(22, 'Preparing filters');
 
     const h3Res = valOrEmpty('h3Resolution') || '9';
     const suitabilityRes = valOrEmpty('suitabilityResolution') || '10';
     const rawLimit = valOrEmpty('rawLimit') || '5000';
 
+    if (progress) progress.update(32, 'Loading suitability layer');
     const suitability = checked('showSuitability')
       ? await getJson(`${api}/api/antenna-suitability.geojson?${buildQuery({resolution: suitabilityRes})}`)
       : emptyFC;
     addOrUpdateSource('suitability', suitability);
 
+    if (progress) progress.update(46, 'Loading confidence layer');
     const confidence = await getJson(`${api}/api/confidence.geojson?${buildQuery({resolution: suitabilityRes})}`);
     addOrUpdateSource('confidence', checked('showConfidence') ? confidence : emptyFC);
 
+    if (progress) progress.update(60, 'Loading H3 layer');
     const h3 = checked('showH3')
       ? await getJson(`${api}/api/h3.geojson?${buildQuery({resolution: h3Res})}`)
       : emptyFC;
     addOrUpdateSource('h3', h3);
 
+    if (progress) progress.update(72, 'Loading raw points');
     const events = checked('showRaw')
       ? await getJson(`${api}/api/events.geojson?${buildQuery({limit: rawLimit})}`)
       : emptyFC;
     addOrUpdateSource('events', events);
 
+    if (progress) progress.update(82, 'Loading candidate pins');
     const candidates = await getJson(`${api}/api/candidates.geojson?${buildQuery({}, {includeTime:false})}`);
     addOrUpdateSource('candidates', candidates);
 
@@ -808,6 +849,7 @@ async function refreshAll(options={}) {
     setLayerVisible('candidate-labels', checked('showCandidates'));
     setLayerVisible('suitability-labels', checked('showSuitability') && checked('showPlainLabels'));
 
+    if (progress) progress.update(90, 'Building map summary');
     const summary = await getJson(`${api}/api/summary?${buildQuery()}`);
     const totals = summary.totals || {};
     const bandLines = (summary.band_summary || []).map(b => `* ${b.band}: ${b.count} events, avg ${b.avg_dbm ?? ''} dBm`).join('\n') || 'No band summary for this filter.';
@@ -822,9 +864,11 @@ async function refreshAll(options={}) {
     updatePlainSummary(suitability, h3, candidates, confidence);
     await updateLimitationsBanner();
     setStatus(`Map refreshed. Suitability cells: ${suitability.features.length}; H3 cells: ${h3.features.length}; raw points: ${events.features.length}.`);
+    if (progress) progress.done(workspaceMode() === 'candidates' ? 'Candidate map loaded' : 'H3 map loaded');
     if (document.getElementById('graphWindow').style.display !== 'none') drawGraph();
   } catch (err) {
     setStatus(`Refresh failed:\n${err.message || err}`);
+    if (progress) progress.error('Map load failed');
   }
 }
 
@@ -847,6 +891,20 @@ async function scoreSites() {
 }
 
 function updatePlainSummary(suitability, h3, candidates, confidence) {
+  if (workspaceMode() === 'candidates') {
+    const candidateCount = candidates?.features?.length || 0;
+    const confFeats = confidence?.features || [];
+    const highConf = confFeats.filter(f => Number(f.properties?.confidence_score || 0) >= 0.75).length;
+    const medConf = confFeats.filter(f => { const v = Number(f.properties?.confidence_score || 0); return v >= 0.30 && v < 0.75; }).length;
+    const lowConf = confFeats.filter(f => Number(f.properties?.confidence_score || 0) < 0.30).length;
+    document.getElementById('plainSummary').textContent =
+      `Candidate engineering readout\nCandidate pins loaded: ${candidateCount}\nEvidence cells in current filter: ${confFeats.length}\nHigh / medium / low confidence cells: ${highConf} / ${medConf} / ${lowConf}\nRanking and assessment use the selected scans, band filter, time window and candidate radius.`;
+    document.getElementById('decisionCards').innerHTML = `
+      <div class="decision-card"><b>CANDIDATES</b><br>${candidateCount}<div class="mini">site pins loaded</div></div>
+      <div class="decision-card"><b>HIGH CONFIDENCE</b><br>${highConf}<div class="mini">evidence-rich cells</div></div>
+      <div class="decision-card"><b>CHECK EVIDENCE</b><br>${medConf + lowConf}<div class="mini">medium or sparse cells</div></div>`;
+    return;
+  }
   const feats = suitability.features || [];
   const good = feats.filter(f => Number(f.properties?.suitability_score || 0) >= 75).length;
   const check = feats.filter(f => { const v = Number(f.properties?.suitability_score || 0); return v >= 50 && v < 75; }).length;
@@ -1148,65 +1206,48 @@ function downloadCandidatePdf() {
 function printAssessment() {
   const html = document.getElementById('assessmentContent').innerHTML;
   const win = window.open('', '_blank');
-  win.document.write(`<html><head><title>MOTH Candidate Assessment</title><style>body{font-family:Arial,sans-serif;margin:24px}table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ccc;padding:6px;text-align:left}.big-good{color:#0b7a0b;font-weight:bold}.big-check{color:#a86a00;font-weight:bold}.big-poor{color:#b00000;font-weight:bold}</style></head><body>${html}
-<!-- LANTERN J2 Live Report link -->
-<a href="/reporting/j2?v=0122" style="position:fixed;right:18px;top:18px;z-index:9999;background:#0b4f7a;color:#fff;padding:10px 14px;border-radius:8px;text-decoration:none;font-family:Arial,sans-serif;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,.25)">
-  J2 Live Report
-</a>
-</body></html>`);
+  win.document.write(`<html><head><title>MOTH Candidate Assessment</title><style>body{font-family:Arial,sans-serif;margin:24px}table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ccc;padding:6px;text-align:left}.big-good{color:#0b7a0b;font-weight:bold}.big-check{color:#a86a00;font-weight:bold}.big-poor{color:#b00000;font-weight:bold}</style></head><body>${html}</body></html>`);
   win.document.close();
   win.focus();
   win.print();
 }
 
-document.getElementById('uploadForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  setStatus('Importing CSV file(s)...');
-  const fd = new FormData(e.target);
-  if (fd.get('white_list_enabled') === null) fd.set('white_list_enabled', 'false');
-  try {
-    const r = await fetch(`${api}/api/import-batch`, { method: 'POST', body: fd });
-    const text = await r.text();
-    if (!r.ok) throw new Error(text);
-    setStatus(`Import complete:\n${text}`);
-    await refreshCollections();
-    await loadMapAoiOptions();
-    await refreshAll({reloadTimeBounds:true});
-  } catch (err) {
-    setStatus(`Import failed:\n${err.message || err}`);
-  }
-});
-
-document.getElementById('candidateForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const data = Object.fromEntries(new FormData(e.target).entries());
-  data.lat = parseFloat(data.lat); data.lon = parseFloat(data.lon);
-  data.practical_score = data.practical_score ? parseFloat(data.practical_score) : 0.5;
-  if (data.antenna_height_agl_m) data.antenna_height_agl_m = parseFloat(data.antenna_height_agl_m); else data.antenna_height_agl_m = null;
-  try {
-    const r = await fetch(`${api}/api/candidates`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
-    const text = await r.text();
-    if (!r.ok) throw new Error(text);
-    setStatus(`Candidate saved:\n${text}`);
-    await refreshAll({reloadTimeBounds:false});
-  } catch (err) {
-    setStatus(`Candidate save failed:\n${err.message || err}`);
-  }
-});
+const candidateForm = document.getElementById('candidateForm');
+if (candidateForm) {
+  candidateForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData(e.target).entries());
+    data.lat = parseFloat(data.lat); data.lon = parseFloat(data.lon);
+    data.practical_score = data.practical_score ? parseFloat(data.practical_score) : 0.5;
+    if (data.antenna_height_agl_m) data.antenna_height_agl_m = parseFloat(data.antenna_height_agl_m); else data.antenna_height_agl_m = null;
+    try {
+      const r = await fetch(`${api}/api/candidates`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+      const text = await r.text();
+      if (!r.ok) throw new Error(text);
+      setStatus(`Candidate saved:\n${text}`);
+      await refreshAll({reloadTimeBounds:false});
+    } catch (err) {
+      setStatus(`Candidate save failed:\n${err.message || err}`);
+    }
+  });
+}
 
 ['showSuitability','showConfidence','showH3','showRaw','showCandidates','showPlainLabels','h3Resolution','suitabilityResolution','rawLimit','useMissionAoi'].forEach(id => {
-  document.getElementById(id).addEventListener('change', () => refreshAll({reloadTimeBounds:false}));
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('change', () => refreshAll({reloadTimeBounds:false}));
 });
 ['minDbm','targetMinHz','targetMaxHz'].forEach(id => {
-  document.getElementById(id).addEventListener('change', () => refreshAll({reloadTimeBounds:true}));
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('change', () => refreshAll({reloadTimeBounds:true}));
 });
 ['enableTimeWindow','timeWindowMinutes'].forEach(id => {
-  document.getElementById(id).addEventListener('change', () => { updateTimeWindowLabel(); refreshAll({reloadTimeBounds:false}); });
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('change', () => { updateTimeWindowLabel(); refreshAll({reloadTimeBounds:false}); });
 });
-document.getElementById('timeScroll').addEventListener('input', () => { updateTimeWindowLabel(); debouncedRefresh(false); });
+const timeScroll = document.getElementById('timeScroll');
+if (timeScroll) timeScroll.addEventListener('input', () => { updateTimeWindowLabel(); debouncedRefresh(false); });
 window.addEventListener('resize', () => { if (document.getElementById('graphWindow').style.display !== 'none') drawGraph(); });
 
-// Single-click feedback: buttons flash immediately so users can see the first click has registered.
 document.addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (!b) return;
@@ -1214,27 +1255,19 @@ document.addEventListener('click', (e) => {
   setTimeout(() => b.classList.remove('flash'), 180);
 }, true);
 
-
 map.on('load', async () => {
+  const progress = mapLoadProgress;
+  if (progress) progress.begin('Starting map', 5);
   initialiseSourcesAndLayers();
+  if (progress) progress.update(18, 'Loading mission context');
   await loadMissionContext({fit:true});
+  if (progress) progress.update(34, 'Loading AOI options');
   await loadMapAoiOptions();
+  if (progress) progress.update(50, 'Loading collections');
   await refreshCollections();
   await refreshAll({reloadTimeBounds:true});
+  if (workspaceMode() === 'candidates') await scoreSites();
 });
 </script>
-
-<!-- LANTERN J2 Live Report link -->
-<a href="/reporting/j2?v=0122" style="position:fixed;right:18px;top:18px;z-index:9999;background:#0b4f7a;color:#fff;padding:10px 14px;border-radius:8px;text-decoration:none;font-family:Arial,sans-serif;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,.25)">
-  J2 Live Report
-</a>
-
-<div style="position:fixed;right:18px;bottom:18px;z-index:9999;font-family:Arial,sans-serif">
-  <a href="/lantern" style="display:inline-block;background:#0b4f7a;color:white;text-decoration:none;padding:10px 12px;border-radius:8px;box-shadow:0 3px 12px rgba(0,0,0,.25);font-weight:700">LANTERN Flight Safety Brief</a>
-</div>
-  <script src="/static/platform_shell.js?v=0127" defer></script>
 </body>
 </html>
-
-
-

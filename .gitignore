@@ -16,6 +16,7 @@ __pycache__/
 
 # Logs/cache
 *.log
+logs/
 .cache/
 .pytest_cache/
 .runtime_tmp/
