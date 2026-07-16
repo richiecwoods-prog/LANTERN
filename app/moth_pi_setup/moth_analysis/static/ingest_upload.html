@@ -151,9 +151,14 @@
     function renderImportResult(payload){
       const imported = Array.isArray(payload.imported) ? payload.imported : [];
       const skipped = Array.isArray(payload.skipped) ? payload.skipped : [];
-      const rows = imported.map(item => `<tr><td>${esc(item.collection_name || item.name || item.collection_id)}</td><td>${esc(item.inserted_events ?? item.event_count ?? '-')}</td><td>${esc(item.collection_id ?? '-')}</td></tr>`).join('');
-      $('result').className = 'statusbox good';
-      $('result').innerHTML = `<b>Import complete.</b> Imported ${esc(payload.imported_count ?? imported.length)} file(s); skipped ${esc(payload.skipped_count ?? skipped.length)}.` + (rows ? `<div class="tablewrap" style="margin-top:10px"><table><tr><th>Collection</th><th>Events</th><th>ID</th></tr>${rows}</table></div>` : '');
+      const importedRows = imported.map(item => `<tr><td>${esc(item.collection_name || item.name || item.collection_id)}</td><td>${esc(item.row_count ?? item.inserted_events ?? item.event_count ?? '-')}</td><td>${esc(item.collection_id ?? '-')}</td></tr>`).join('');
+      const skippedRows = skipped.map(item => `<tr><td>${esc(item.file_name || item.name || '-')}</td><td>${esc(item.reason || 'Skipped by import guard')}</td></tr>`).join('');
+      const importedCount = Number(payload.imported_count ?? imported.length);
+      const skippedCount = Number(payload.skipped_count ?? skipped.length);
+      $('result').className = importedCount ? 'statusbox good' : (skippedCount ? 'statusbox warn' : 'statusbox');
+      $('result').innerHTML = `<b>Import complete.</b> Imported ${esc(importedCount)} file(s); skipped ${esc(skippedCount)}.` +
+        (importedRows ? `<div class="tablewrap" style="margin-top:10px"><table><tr><th>Collection</th><th>Rows</th><th>ID</th></tr>${importedRows}</table></div>` : '') +
+        (skippedRows ? `<div class="tablewrap" style="margin-top:10px"><table><tr><th>Skipped file</th><th>Reason</th></tr>${skippedRows}</table></div><p class="muted">Skipped duplicate files are already protected in the database and can be selected from Loaded collections.</p>` : '');
     }
     async function loadCollections(){
       try{
@@ -162,7 +167,7 @@
           $('collections').innerHTML = '<table><tr><td class="muted">No collections loaded yet.</td></tr></table>';
           return;
         }
-        $('collections').innerHTML = '<table><tr><th>Collection</th><th>Device</th><th>Events</th><th>Uploaded</th></tr>' + rows.slice(0, 30).map(row => `<tr><td>${esc(row.collection_name || row.name || row.collection_id)}</td><td>${esc(row.device_serial || '-')}</td><td>${esc(row.valid_events_in_db ?? row.total_events_in_db ?? '-')} / ${esc(row.total_events_in_db ?? '-')}</td><td>${esc(row.upload_time_utc || '-')}</td></tr>`).join('') + '</table>';
+        $('collections').innerHTML = '<table><tr><th>ID</th><th>Collection</th><th>Device</th><th>Events</th><th>Uploaded</th></tr>' + rows.slice(0, 30).map(row => `<tr><td>${esc(row.collection_id ?? '-')}</td><td>${esc(row.collection_name || row.name || row.collection_id)}</td><td>${esc(row.device_serial || '-')}</td><td>${esc(row.valid_events_in_db ?? row.total_events_in_db ?? '-')} / ${esc(row.total_events_in_db ?? '-')}</td><td>${esc(row.upload_time_utc || '-')}</td></tr>`).join('') + '</table>';
       }catch(error){
         $('collections').innerHTML = `<table><tr><td class="statusbox bad">${esc(error.message || error)}</td></tr></table>`;
       }

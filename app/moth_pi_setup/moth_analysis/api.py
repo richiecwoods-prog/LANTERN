@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import csv
+import html
 import json
 import math
 import os
 import re
 import shutil
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Annotated, Any
@@ -415,10 +416,15 @@ def parse_collection_ids(collection_id: int | None = None, collection_ids: str |
     if collection_id is not None:
         ids.add(int(collection_id))
     if collection_ids:
+        normalized = collection_ids.strip().lower()
+        if normalized in {"__none__", "none", "no collections", "no-collections"}:
+            return [-1]
         for part in collection_ids.replace(";", ",").split(","):
             part = part.strip()
             if not part:
                 continue
+            if part.lower() in {"__none__", "none", "no collections", "no-collections"}:
+                return [-1]
             try:
                 ids.add(int(part))
             except ValueError as exc:
@@ -7689,6 +7695,59 @@ def _lantern_op_source_hints(conn, sql_where: str, params: list[Any], spike_dbm:
     ).fetchall())
 
 
+def _lantern_op_map_evidence(conn, sql_where: str, params: list[Any], spike_dbm: float, limit: int = 140) -> dict[str, Any]:
+    bounds_row = conn.execute(
+        f"""
+        SELECT MIN(lat) AS min_lat,
+               MAX(lat) AS max_lat,
+               MIN(lon) AS min_lon,
+               MAX(lon) AS max_lon,
+               COUNT(*) AS geolocated_event_count
+        FROM moth_events
+        WHERE {sql_where} AND lat IS NOT NULL AND lon IS NOT NULL
+              AND NOT (ABS(lat) < 0.000001 AND ABS(lon) < 0.000001)
+        """,
+        params,
+    ).fetchone()
+    bounds = dict(bounds_row) if bounds_row else {}
+    points = rows_to_dicts(conn.execute(
+        f"""
+        SELECT ROUND(lat, 4) AS lat,
+               ROUND(lon, 4) AS lon,
+               CAST(frequency_hz / 1000000.0 AS INTEGER) AS freq_bin_mhz,
+               COUNT(*) AS event_count,
+               MAX(strength_dbm) AS max_dbm,
+               AVG(strength_dbm) AS avg_dbm,
+               MIN(timestamp_utc) AS first_utc,
+               MAX(timestamp_utc) AS last_utc,
+               COUNT(DISTINCT collection_id) AS collection_count
+        FROM moth_events
+        WHERE {sql_where} AND strength_dbm >= ? AND lat IS NOT NULL AND lon IS NOT NULL
+              AND NOT (ABS(lat) < 0.000001 AND ABS(lon) < 0.000001)
+        GROUP BY ROUND(lat, 4), ROUND(lon, 4), CAST(frequency_hz / 1000000.0 AS INTEGER)
+        ORDER BY event_count DESC, max_dbm DESC
+        LIMIT ?
+        """,
+        list(params) + [float(spike_dbm), int(limit)],
+    ).fetchall())
+    sane_bounds = all(bounds.get(k) is not None for k in ("min_lat", "max_lat", "min_lon", "max_lon"))
+    if sane_bounds:
+        for key in ("min_lat", "max_lat", "min_lon", "max_lon"):
+            bounds[key] = float(bounds[key])
+        bounds["geolocated_event_count"] = int(bounds.get("geolocated_event_count") or 0)
+        bounds["center_lat"] = (float(bounds["min_lat"]) + float(bounds["max_lat"])) / 2.0
+        bounds["center_lon"] = (float(bounds["min_lon"]) + float(bounds["max_lon"])) / 2.0
+    else:
+        bounds = {"geolocated_event_count": 0}
+    return {
+        "bounds": bounds,
+        "points": points,
+        "point_count": len(points),
+        "point_limit": int(limit),
+        "description": "Strong RF detections grouped by rounded GPS position and frequency bin for report mapping.",
+    }
+
+
 def _lantern_op_quality_level() -> dict[str, Any]:
     try:
         q = get_latest_quality_summary(DB_PATH)
@@ -7762,6 +7821,147 @@ def _lantern_op_status_from_metrics(total_sane: int, gnss_events: int, strong_gn
     return "RF SUPPORTS LAUNCH", "good", score, holds, checks
 
 
+def _lantern_jamming_assessment_parameters(
+    *,
+    spike_dbm: float,
+    width_mhz: float,
+    link: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    link_configured = bool(link and link.get("configured"))
+    return {
+        "strong_detection_threshold_dbm": float(spike_dbm),
+        "gnss_window_width_mhz": float(width_mhz),
+        "gnss_window_half_width_mhz": float(width_mhz) / 2.0,
+        "gnss_window_definition": "GNSS detections are counted when frequency falls inside each known GNSS band centre +/- half the configured window width.",
+        "suspected_jamming_or_harmful_interference": [
+            "10 or more strong GNSS-window detections at or above the selected spike threshold.",
+            "Any strong detection at or above the selected spike threshold inside the configured UAS C2/telemetry/video link band.",
+        ],
+        "rf_interference_indicator": [
+            "One or more strong GNSS-window detections below the suspected-jamming count threshold.",
+            "Concurrent strong detections across more than one collection/receiver minute, indicating source-location review may be relevant.",
+        ],
+        "strong_detection_definition": f"strength_dbm >= {float(spike_dbm):.1f} dBm",
+        "configured_uas_link_band": {
+            "configured": link_configured,
+            "min_hz": link.get("min_hz") if link_configured else None,
+            "max_hz": link.get("max_hz") if link_configured else None,
+            "rule": "If configured, any strong detection inside this band is treated as harmful-interference evidence for launch reporting.",
+        },
+        "confidence_parameters": [
+            "MEDIUM confidence requires suspected-jamming/interference criteria plus either concurrent-source indicators or at least two collections.",
+            "LOW or LOW-MEDIUM confidence is used when evidence is sparse, single-collection, or indicator-only.",
+        ],
+        "interpretation_boundary": "These parameters identify RF evidence for reporting. They do not prove intent, source identity, regulatory interference, aircraft navigation failure, or airworthiness impact without receiver symptoms and operational checks.",
+    }
+
+
+def _lantern_jamrep_review_pack(
+    *,
+    readiness: dict[str, Any],
+    classification: str,
+    confidence: str,
+    affected: list[dict[str, Any]],
+    strong_gnss: int,
+    source_hints: int,
+    link_strong: int,
+) -> dict[str, Any]:
+    filters = readiness.get("filters") or {}
+    totals = readiness.get("totals") or {}
+    quality = readiness.get("data_quality") or {}
+    anomalies = readiness.get("time_anomalies") or {}
+    sensor = readiness.get("sensor") or {}
+    map_evidence = readiness.get("map_evidence") or {}
+    map_bounds = map_evidence.get("bounds") or {}
+    collections = readiness.get("collections") or {}
+    top_spikes = readiness.get("top_spikes") or []
+    source_rows = readiness.get("source_hints") or []
+    affected_names = [str(a.get("service")) for a in affected if a.get("service")]
+    first_utc = totals.get("first_utc") or collections.get("collection_start_utc") or "not recorded"
+    last_utc = totals.get("last_utc") or collections.get("collection_end_utc") or "not recorded"
+    data_level = str(quality.get("level") or "CHECK")
+    live_state = str(sensor.get("state") or "UNKNOWN")
+    geolocated_count = int(map_bounds.get("geolocated_event_count") or 0)
+    top_freqs = [f"{s.get('freq_bin_mhz')} MHz max {s.get('max_dbm')} dBm" for s in top_spikes[:5]]
+    return {
+        "report_control": {
+            "report_type": "LANTERN J2 SIGINT / RF interference evidence pack",
+            "classification": classification,
+            "confidence": confidence,
+            "generated_utc": readiness.get("generated_utc"),
+            "analysis_window_utc": {"start": first_utc, "end": last_utc},
+            "collection_count": int(totals.get("collection_count") or 0),
+            "event_count": int(totals.get("event_count") or 0),
+            "data_status": data_level,
+            "scope_note": "J2/SIGINT aviation RF decision-support evidence. Not a formal regulatory finding, emitter attribution statement, targeting product, or airworthiness release.",
+        },
+        "j2_sigint_function": [
+            "Function: provide J2 with a structured SIGINT-style RF evidence picture for GNSS, UAS C2, telemetry and payload/video link risk.",
+            "Collection: consolidate MOTH/live sensor/imported RF detections, sensor posture, GPS position quality, timestamp sanity checks and geospatial evidence.",
+            "Analysis: separate RF facts from assessment, identify affected services, strong detections, concurrent-source indicators, map concentration and operational relevance.",
+            "Reporting: support JAMREP/interference reporting, launch-release discussion, commander briefing and handover to spectrum/EW/comms engineering staff.",
+            "Intelligence boundary: this product supports situational awareness and J2 fusion. It does not attribute intent, actor, equipment type or emitter ownership without corroborating intelligence and authorised analytical review.",
+        ],
+        "aviation_operational_relevance": [
+            "The observed RF picture is operationally relevant to GNSS integrity, navigation confidence, launch timing, lost-link risk and UAS command/control resilience.",
+            "The report is most significant when the RF evidence coincides with receiver symptoms such as satellite-count loss, C/N0 degradation, HDOP/PDOP increase, autopilot navigation warnings, datalink warnings or crew/pilot observations.",
+            "An RF HOLD or RF CHECK state indicates that mission command, flight safety, spectrum management and engineering staff should treat the RF environment as a material factor in the aviation release decision.",
+        ],
+        "evidence_chain": [
+            f"{int(totals.get('event_count') or 0):,} mission-time RF events were included after timestamp sanity filtering.",
+            f"{strong_gnss:,} strong GNSS-window detections met the configured threshold.",
+            f"{source_hints} concurrent-source indicator windows were identified.",
+            f"{geolocated_count:,} geolocated events support the report map." if geolocated_count else "No geolocated strong RF evidence is available for the report map.",
+            f"Top spike bins: {', '.join(top_freqs)}." if top_freqs else "No top spike bins were returned for the active filters.",
+        ],
+        "data_quality_assurance": [
+            f"Data quality status: {data_level}.",
+            f"Timestamp anomaly rows excluded from the operational readout: {int(anomalies.get('count') or 0):,}.",
+            f"Latest quality source: {(quality.get('latest') or {}).get('source_file') or 'not recorded'}.",
+            "The stated confidence assumes that collection clocks, antenna state, sensor placement, import reject reasons and duplicate collection risk remain consistent with the recorded data-quality status.",
+        ],
+        "sensor_posture": [
+            f"Live sensor posture: {live_state}.",
+            f"Sensor usable for live aviation context: {'yes' if sensor.get('usable') else 'no / not confirmed'}.",
+            "Where live sensor posture is CHECK or NO LIVE SENSOR, the report is best read as historical or imported RF evidence unless corroborated by live receiver indications or a fresh RF collection.",
+        ],
+        "frequency_impact": {
+            "affected_services": affected_names,
+            "configured_uas_link_strong_detections": link_strong,
+            "summary": "GNSS-band evidence is relevant to navigation and timing. Configured UAS link-band evidence, when supplied, is relevant to C2, telemetry, payload/video, and lost-link risk.",
+        },
+        "geospatial_context": {
+            "bounds": {
+                "min_lat": map_bounds.get("min_lat"),
+                "max_lat": map_bounds.get("max_lat"),
+                "min_lon": map_bounds.get("min_lon"),
+                "max_lon": map_bounds.get("max_lon"),
+            },
+            "source_hint_windows": len(source_rows),
+            "map_point_groups": map_evidence.get("point_count"),
+            "note": "Map points show evidence concentration from logged receiver positions, not bearing-only triangulation or confirmed emitter location.",
+        },
+        "confidence_statement": [
+            f"Current confidence is {confidence} because the classification is based on RF event strength, frequency proximity, collection overlap, timestamp filtering, and data quality.",
+            "Confidence should be increased only with independent receiver symptoms, repeated collections, calibrated spectrum measurements, known antenna geometry, or confirmed operational impact.",
+            "Confidence should be reduced where GPS position is missing/zero, collection clocks are suspect, sensor placement is unknown, or only one receiver/collection supports the observation.",
+        ],
+        "escalation_and_coordination": [
+            "The mission commander or flight safety lead is the appropriate owner for deciding whether the RF HOLD or suspected-jamming finding affects the sortie.",
+            "J2, spectrum management, EW or communications engineering are the appropriate technical owners for RF intelligence fusion, emitter investigation and authorised mitigation.",
+            "Raw MOTH files, import logs, screenshots, receiver state, operator notes and exact UTC timing form the audit trail for later review.",
+            "Where aviation safety may be affected, NOTAM, airspace control, regulatory or command reporting channels should be considered under local procedures.",
+        ],
+        "missing_information_for_formal_review": [
+            "Formal review normally requires the aircraft or UAS type, mission profile, altitude, route or launch site, and critical RF links.",
+            "Receiver evidence normally includes fix type, satellite count, C/N0, HDOP/PDOP, spoofing/jamming flags, datalink quality and autopilot warnings.",
+            "Sensor evidence normally includes device serial or model, calibration state, antenna type, orientation, height, sensor location and collection operator.",
+            "The operational record normally states whether launch was held, delayed, rerouted, mitigated, continued or assessed as having no aviation effect.",
+            "External corroboration may include other aircraft reports, spectrum analyser capture, independent GNSS receiver evidence, source reporting, regulatory source material or local EW/spectrum reporting.",
+        ],
+    }
+
+
 def _lantern_build_launch_readiness_payload(
     *,
     collection_id: int | None = None,
@@ -7807,6 +8007,7 @@ def _lantern_build_launch_readiness_payload(
         bands = _lantern_op_band_summary(conn, sql_where, params, spike_dbm, width_mhz)
         top_spikes = _lantern_op_top_spikes(conn, sql_where, params, spike_dbm)
         source_hints = _lantern_op_source_hints(conn, sql_where, params, spike_dbm)
+        map_evidence = _lantern_op_map_evidence(conn, sql_where, params, spike_dbm)
         link = _lantern_op_band_range_summary(conn, sql_where, params, link_min_hz, link_max_hz, spike_dbm)
     finally:
         conn.close()
@@ -7840,6 +8041,7 @@ def _lantern_build_launch_readiness_payload(
             "link_min_hz": link_min_hz,
             "link_max_hz": link_max_hz,
         },
+        "assessment_parameters": _lantern_jamming_assessment_parameters(spike_dbm=spike_dbm, width_mhz=width_mhz, link=link),
         "summary": {
             "headline": status,
             "recommendation": "Treat this as RF decision support only; final UAS launch authority remains outside LANTERN.",
@@ -7860,6 +8062,7 @@ def _lantern_build_launch_readiness_payload(
         "uas_link_band": link or {"configured": False, "message": "No UAS C2/telemetry/video link band configured for this run."},
         "top_spikes": top_spikes,
         "source_hints": source_hints,
+        "map_evidence": map_evidence,
         "limitations": [
             "MOTH logs detected RF events; quiet periods do not prove the absence of interference.",
             "GNSS-window activity is RF survey evidence, not direct receiver integrity or aircraft navigation performance.",
@@ -7969,6 +8172,16 @@ def lantern_reporting_jamming_report(
             "operational_effect": "Potential effect is reduced GNSS/C2 confidence for UAS launch planning. This report is evidence support, not a regulatory or airworthiness determination.",
             "confidence_basis": "Confidence is based on event count, spike strength, timestamp sanity, collection overlap and configured link-band evidence.",
         },
+        "assessment_parameters": _lantern_jamming_assessment_parameters(spike_dbm=spike_dbm, width_mhz=width_mhz, link=link),
+        "review_pack": _lantern_jamrep_review_pack(
+            readiness=readiness,
+            classification=classification,
+            confidence=confidence,
+            affected=affected,
+            strong_gnss=strong_gnss,
+            source_hints=source_hints,
+            link_strong=link_strong,
+        ),
         "evidence": {
             "filters": readiness.get("filters"),
             "totals": readiness.get("totals"),
@@ -7976,12 +8189,157 @@ def lantern_reporting_jamming_report(
             "time_anomalies": readiness.get("time_anomalies"),
             "top_spikes": readiness.get("top_spikes"),
             "source_hints": readiness.get("source_hints"),
+            "map_evidence": readiness.get("map_evidence"),
             "gnss_bands": readiness.get("gnss_bands"),
             "sensor": readiness.get("sensor"),
         },
         "actions": actions,
         "limitations": readiness.get("limitations"),
     }
+
+
+def _lantern_jsp101_escape(value: Any) -> str:
+    return html.escape(str(value if value is not None else "-"))
+
+
+def _lantern_jsp101_time(value: Any, local_time: bool = False) -> str:
+    text = str(value or "")
+    if not text:
+        return "-"
+    if not local_time:
+        return text
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        local = dt.astimezone(timezone(timedelta(hours=3)))
+        return f"{text} / {local.strftime('%Y-%m-%d %H:%M:%S')} UTC+3"
+    except Exception:
+        return text
+
+
+def _lantern_jsp101_list(items: list[Any] | tuple[Any, ...] | None) -> str:
+    clean = [str(x) for x in (items or []) if str(x or "").strip()]
+    if not clean:
+        return "<p>None recorded.</p>"
+    return "<ol>" + "".join(f"<li>{_lantern_jsp101_escape(x)}</li>" for x in clean) + "</ol>"
+
+
+def _lantern_jsp101_table(headers: list[str], rows: list[list[Any]]) -> str:
+    head = "".join(f"<th>{_lantern_jsp101_escape(h)}</th>" for h in headers)
+    body = "".join(
+        "<tr>" + "".join(f"<td>{_lantern_jsp101_escape(cell)}</td>" for cell in row) + "</tr>"
+        for row in rows
+    )
+    if not body:
+        body = f"<tr><td colspan='{len(headers)}'>No rows returned for the active filters.</td></tr>"
+    return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+
+
+@app.get("/api/reporting/jamming-report-jsp101.html", response_class=HTMLResponse)
+def lantern_reporting_jamming_report_jsp101_html(
+    collection_id: int | None = None,
+    collection_ids: str | None = None,
+    start_utc: str | None = None,
+    end_utc: str | None = None,
+    spike_dbm: float = Query(default=-60.0),
+    width_mhz: float = Query(default=40.0, ge=1.0, le=100.0),
+    link_min_hz: float | None = None,
+    link_max_hz: float | None = None,
+    include_time_anomalies: bool = False,
+    local_time: bool = False,
+) -> HTMLResponse:
+    data = lantern_reporting_jamming_report(
+        collection_id=collection_id,
+        collection_ids=collection_ids,
+        start_utc=start_utc,
+        end_utc=end_utc,
+        spike_dbm=spike_dbm,
+        width_mhz=width_mhz,
+        link_min_hz=link_min_hz,
+        link_max_hz=link_max_hz,
+        include_time_anomalies=include_time_anomalies,
+    )
+    pack = data.get("review_pack") or {}
+    rc = pack.get("report_control") or {}
+    evidence = data.get("evidence") or {}
+    totals = evidence.get("totals") or {}
+    map_evidence = evidence.get("map_evidence") or {}
+    bounds = map_evidence.get("bounds") or {}
+    params = data.get("assessment_parameters") or {}
+    time_note = "UTC is the audit baseline. Local time is shown as UTC+3 where included." if local_time else "UTC is the audit baseline."
+    window_start = _lantern_jsp101_time((rc.get("analysis_window_utc") or {}).get("start"), local_time)
+    window_end = _lantern_jsp101_time((rc.get("analysis_window_utc") or {}).get("end"), local_time)
+    generated = _lantern_jsp101_time(data.get("generated_utc"), local_time)
+    affected_rows = [
+        [
+            row.get("service"),
+            row.get("event_count"),
+            row.get("strong_spike_count"),
+            row.get("max_dbm"),
+            " - ".join(str(x) for x in (row.get("frequency_range_hz") or []) if x is not None),
+        ]
+        for row in data.get("affected_services") or []
+    ]
+    evidence_rows = [
+        ["Included RF events", f"{int(totals.get('event_count') or 0):,}"],
+        ["Collections", f"{int(totals.get('collection_count') or 0):,}"],
+        ["First evidence time", _lantern_jsp101_time(totals.get("first_utc"), local_time)],
+        ["Last evidence time", _lantern_jsp101_time(totals.get("last_utc"), local_time)],
+        ["Timestamp anomalies excluded", f"{int((evidence.get('time_anomalies') or {}).get('count') or 0):,}"],
+        ["Source-hint windows", f"{len(evidence.get('source_hints') or []):,}"],
+        ["Geolocated events", f"{int(bounds.get('geolocated_event_count') or 0):,}"],
+        ["Mapped strong-frequency groups", f"{int(map_evidence.get('point_count') or 0):,}"],
+    ]
+    parameter_rows = [
+        ["Strong detection", params.get("strong_detection_definition")],
+        ["GNSS window", f"{params.get('gnss_window_width_mhz')} MHz total"],
+        ["Suspected jamming / harmful interference", " ".join(params.get("suspected_jamming_or_harmful_interference") or [])],
+        ["RF interference indicator", " ".join(params.get("rf_interference_indicator") or [])],
+        ["Interpretation boundary", params.get("interpretation_boundary")],
+    ]
+    html_doc = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>LANTERN J2 SIGINT JAMREP JSP 101 Export</title>
+<style>
+@page{{size:A4;margin:18mm}}body{{font-family:Arial,Helvetica,sans-serif;color:#111;max-width:920px;margin:24px auto;line-height:1.35}}h1{{font-size:22px;color:#17365d;border-bottom:2px solid #17365d;padding-bottom:6px}}h2{{font-size:16px;color:#17365d;margin-top:18px}}p,li{{font-size:12.5px}}table{{width:100%;border-collapse:collapse;margin:8px 0 14px}}th{{background:#17365d;color:#fff;text-align:left}}td,th{{border:1px solid #aaa;padding:6px;font-size:12px;vertical-align:top}}.meta{{font-size:11px;color:#555}}.box{{border:1px solid #999;padding:10px;margin:8px 0}}.warn{{border-left:5px solid #b42318}}button{{margin:8px 0;padding:8px 12px}}@media print{{button{{display:none}}body{{max-width:none;margin:0}}}}
+</style></head><body>
+<button onclick="window.print()">Print / save as PDF</button>
+<h1>LANTERN J2 SIGINT / RF INTERFERENCE REPORT</h1>
+<p class="meta">Generated: {_lantern_jsp101_escape(generated)} | Format: JSP 101-style numbered staff report | {_lantern_jsp101_escape(time_note)}</p>
+<div class="box warn"><strong>Classification:</strong> {_lantern_jsp101_escape(data.get('classification'))}<br><strong>Confidence:</strong> {_lantern_jsp101_escape(data.get('confidence'))}<br><strong>RF readiness:</strong> {_lantern_jsp101_escape(data.get('readiness_status'))} ({_lantern_jsp101_escape(data.get('score_0_100'))}/100)</div>
+<h2>1. Purpose</h2>
+<p>1.1. This report records LANTERN RF evidence relevant to suspected GNSS jamming, RF interference and configured UAS link-band impact. It is prepared as a J2/SIGINT aviation decision-support evidence pack and does not by itself constitute regulatory attribution, targeting intelligence, airworthiness release or final mission authority.</p>
+<h2>2. J2 / SIGINT Function</h2>
+{_lantern_jsp101_list(pack.get('j2_sigint_function'))}
+<h2>3. Executive Summary</h2>
+<p>3.1. {_lantern_jsp101_escape((data.get('narrative') or {}).get('summary'))}</p>
+<p>3.2. {_lantern_jsp101_escape((data.get('narrative') or {}).get('operational_effect'))}</p>
+<h2>4. Scope and Time Basis</h2>
+<p>4.1. Report window: {_lantern_jsp101_escape(window_start)} to {_lantern_jsp101_escape(window_end)}.</p>
+<p>4.2. {_lantern_jsp101_escape(time_note)} Local time is included only to assist operators and reviewers.</p>
+<p>4.3. Scope note: {_lantern_jsp101_escape(rc.get('scope_note'))}</p>
+<h2>5. Assessment Parameters</h2>
+{_lantern_jsp101_table(['Parameter','Value'], parameter_rows)}
+<h2>6. Evidence Summary</h2>
+{_lantern_jsp101_table(['Evidence field','Value'], evidence_rows)}
+<h2>7. Affected Services</h2>
+{_lantern_jsp101_table(['Service','Events','Strong detections','Max dBm','Frequency range Hz'], affected_rows)}
+<h2>8. Aviation Operational Relevance</h2>
+{_lantern_jsp101_list(pack.get('aviation_operational_relevance'))}
+<h2>9. Data Quality and Assurance</h2>
+{_lantern_jsp101_list(pack.get('data_quality_assurance'))}
+<h2>10. Sensor Posture</h2>
+{_lantern_jsp101_list(pack.get('sensor_posture'))}
+<h2>11. Geospatial Context</h2>
+<p>11.1. Evidence bounds: {_lantern_jsp101_escape(bounds.get('min_lat'))}, {_lantern_jsp101_escape(bounds.get('min_lon'))} to {_lantern_jsp101_escape(bounds.get('max_lat'))}, {_lantern_jsp101_escape(bounds.get('max_lon'))}. Map points show logged receiver evidence concentration, not a confirmed emitter location.</p>
+<h2>12. Coordination and Actions</h2>
+{_lantern_jsp101_list(data.get('actions'))}
+<h2>13. Limitations</h2>
+{_lantern_jsp101_list(data.get('limitations'))}
+<h2>14. Annex A - Formal Review Additions</h2>
+{_lantern_jsp101_list(pack.get('missing_information_for_formal_review'))}
+</body></html>"""
+    return HTMLResponse(html_doc)
+
+
 def _v012_route_exists(path: str) -> bool:
     try:
         return any(getattr(route, "path", None) == path for route in app.routes)  # type: ignore[name-defined]
@@ -8023,7 +8381,7 @@ def _v012_nav_registry() -> dict[str, _V012Any]:
         ],
         "reporting": [
             {"key": "launch-readiness", "title": "Launch Readiness", "url": "/reporting/launch-readiness?v=0122", "description": "Fast RF posture, GNSS burden, UAS link risk, data quality and launch-support recommendation."},
-            {"key": "jamming-report", "title": "Jamming / Interference Report", "url": "/reporting/jamming?v=0122", "description": "Suspected GNSS/C2 interference report with affected services, evidence and actions."},
+            {"key": "jamming-report", "title": "J2 SIGINT / RF Interference Report", "url": "/reporting/jamming?v=0122", "description": "SIGINT-style GNSS/C2 RF evidence report with affected services, map evidence and aviation actions."},
             {"key": "flight-safety", "title": "Flight Safety Brief", "url": "/reporting/flight-safety?v=0122", "description": "Pilot-facing GNSS/RF burden and clearest observed constellation/band."},
             {"key": "mission-brief", "title": "Mission Operations Brief", "url": "/reporting/mission-brief?v=0122", "description": "Senior/ops readiness summary, caveats and decision-support brief."},
             {"key": "j2", "title": "J2 Live Report", "url": "/reporting/j2?v=0122", "description": "OSINT articles, threat actors, aviation/security context and source log."},
@@ -8216,7 +8574,7 @@ def lantern_v012_reporting_launch_readiness_page() -> str:
 
 @app.get("/reporting/jamming", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_reporting_jamming_page() -> str:
-    return _v012_static_page("jamming_report.html", "LANTERN Jamming / Interference Report")
+    return _v012_static_page("jamming_report.html", "LANTERN J2 SIGINT / RF Interference Report")
 
 @app.get("/reporting/flight-safety", response_class=_V012HTMLResponse)  # type: ignore[name-defined]
 def lantern_v012_reporting_flight_safety() -> str:
